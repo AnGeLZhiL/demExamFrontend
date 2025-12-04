@@ -9,7 +9,7 @@
     </header>
 
     <section class="filters-panel">
-        <form @submit.prevent="applyFilters" class="filters-form">
+        <form @submit.prevent class="filters-form">
             <!-- Поле поиска -->
             <fieldset class="filter-group">
             <label for="search">Поиск по названию:</label>
@@ -18,30 +18,59 @@
                 type="text"
                 v-model="filters.search"
                 placeholder="Введите название..."
+                @input="applyFilters"
             />
             </fieldset>
 
             <!-- Фильтр по статусу -->
             <fieldset class="filter-group">
             <label for="status">Статус:</label>
-            <select id="status" v-model="filters.statusId">
+            <select 
+                id="status" 
+                v-model="filters.statusId"
+                @change="applyFilters">
                 <option value="">Все статусы</option>
-                <option value="1">Запланирован</option>
-                <option value="2">Активен</option>
-                <option value="3">Завершен</option>
+                <option v-for="status in statuses" :key="status.id" :value="status.id">
+                    {{ status.name }}
+                </option>
             </select>
             </fieldset>
 
             <!-- Кнопки действий -->
             <fieldset class="filter-actions">
-            <button type="submit" class="apply-btn">
-                Применить
-            </button>
             <button type="button" @click="resetFilters" class="reset-btn">
                 Сбросить
             </button>
             </fieldset>
         </form>
+    </section>
+
+    <section v-if="!loading && !error && events.length > 0" class="sort-panel">
+        <span class="sort-label">Сортировка:</span>
+        
+        <button 
+            @click="sortBy('date')" 
+            class="sort-btn"
+            :class="{ active: sortField === 'date' }"
+        >
+            По дате
+        </button>
+        
+        <button 
+            @click="sortBy('name')" 
+            class="sort-btn"
+            :class="{ active: sortField === 'name' }"
+        >
+            По названию
+        </button>
+        
+        <!--<button 
+            @click="sortBy('status')" 
+            class="sort-btn"
+            :class="{ active: sortField === 'status' }"
+        >
+            По статусу
+        </button>-->
     </section>
 
     <!-- Контент страницы -->
@@ -71,11 +100,10 @@
       <!-- Список мероприятий -->
       <section v-else class="events-list">
         <article 
-          v-for="event in events" 
-          :key="event.id" 
-          class="event-card"
-          :class="getStatusClass(event.status.id)"
-        >
+            v-for="event in sortedEvents" 
+            :key="event.id" 
+            class="event-card"
+            >
           <header class="event-header">
             <h2 class="event-title">{{ event.name }}</h2>
             <span class="event-status" :class="getStatusBadgeClass(event.status.id)">
@@ -101,10 +129,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { EventsService } from '@/services/eventsService'
 
 const events = ref([])
+const statuses = ref([])
 const loading = ref(false)
 const error = ref('')
 
@@ -114,9 +143,76 @@ const filters = ref({
   statusId: ''
 })
 
+// Сортировка
+const sortField = ref('date') // 'date', 'name', 'status'
+const sortDirection = ref('asc') // 'asc', 'desc'
+
+// Дебаунс для поиска
+let searchTimeout = null
+
+// Вычисляемое свойство - отсортированные мероприятия
+const sortedEvents = computed(() => {
+  if (!events.value.length) return []
+  
+  return [...events.value].sort((a, b) => {
+    let aValue, bValue
+    
+    // Выбираем поле для сортировки
+    switch (sortField.value) {
+      case 'date':
+        aValue = new Date(a.date).getTime()
+        bValue = new Date(b.date).getTime()
+        break
+      case 'name':
+        aValue = a.name.toLowerCase()
+        bValue = b.name.toLowerCase()
+        break
+      /*case 'status':
+        aValue = a.status.name.toLowerCase()
+        bValue = b.status.name.toLowerCase()
+        break*/
+      default:
+        return 0
+    }
+    
+    // Сравниваем значения
+    if (aValue < bValue) {
+      return sortDirection.value === 'asc' ? -1 : 1
+    }
+    if (aValue > bValue) {
+      return sortDirection.value === 'asc' ? 1 : -1
+    }
+    return 0
+  })
+})
+
+// Загрузка статусов из API
+const loadStatuses = async () => {
+  try {
+    console.log('🏷️ Загружаем статусы мероприятий...')
+    const data = await EventsService.getStatuses()
+    statuses.value = data
+    console.log('✅ Статусы загружены:', data)
+  } catch (error) {
+    console.error('❌ Ошибка загрузки статусов:', error)
+    // Fallback если API не работает
+    statuses.value = [
+      { id: 1, name: 'Запланирован' },
+      { id: 2, name: 'Активен' },
+      { id: 3, name: 'Завершен' }
+    ]
+  }
+}
+
 // Методы для фильтров
 const applyFilters = () => {
-  loadEvents()
+  if (searchTimeout) {
+    clearTimeout(searchTimeout)
+  }
+  
+  searchTimeout = setTimeout(() => {
+    loadEvents()
+  }, 500)
 }
 
 const resetFilters = () => {
@@ -126,6 +222,45 @@ const resetFilters = () => {
   }
   loadEvents()
 }
+
+// Функция сортировки
+const sortBy = (field) => {
+  if (sortField.value === field) {
+    // Если уже сортируем по этому полю, меняем направление
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    // Если новое поле, сортируем по возрастанию
+    sortField.value = field
+    sortDirection.value = 'asc'
+  }
+  
+  console.log(`📊 Сортировка по ${field} (${sortDirection.value})`)
+}
+
+// Получение читаемого названия сортировки
+const getSortLabel = (field) => {
+  const labels = {
+    'date': 'дате',
+    'name': 'названию', 
+    'status': 'статусу'
+  }
+  return labels[field] || field
+}
+
+// Watcher для автоматического применения фильтров
+watch(
+  () => filters.value,
+  (newFilters, oldFilters) => {
+    const hasChanged = 
+      newFilters.search !== oldFilters.search ||
+      newFilters.statusId !== oldFilters.statusId
+    
+    if (hasChanged) {
+      applyFilters()
+    }
+  },
+  { deep: true }
+)
 
 // Форматирование даты
 const formatDate = (dateString) => {
@@ -145,26 +280,27 @@ const formatDate = (dateString) => {
   }
 }
 
-// Классы для статусов
+// Классы для карточек статусов
 const getStatusClass = (statusId) => {
   const classes = {
-    1: 'status-planned',    // Запланирован
-    2: 'status-active',     // Активен
-    3: 'status-completed'   // Завершен
+    1: 'status-planned',
+    2: 'status-active',
+    3: 'status-completed'
   }
   return classes[statusId] || 'status-unknown'
 }
 
+// Классы для бейджей статусов
 const getStatusBadgeClass = (statusId) => {
   const classes = {
-    1: 'badge-planned',    // Запланирован
-    2: 'badge-active',     // Активен  
-    3: 'badge-completed'   // Завершен
+    1: 'badge-planned',
+    2: 'badge-active',
+    3: 'badge-completed'
   }
   return classes[statusId] || 'badge-unknown'
 }
 
-// Обновляем loadEvents для поддержки фильтров
+// Загрузка мероприятий
 const loadEvents = async () => {
   console.log('🔄 Загружаем мероприятия...')
   
@@ -172,7 +308,6 @@ const loadEvents = async () => {
     loading.value = true
     error.value = ''
     
-    // Передаем фильтры в сервис
     const data = await EventsService.getEvents({
       search: filters.value.search || undefined,
       statusId: filters.value.statusId || undefined
@@ -188,7 +323,6 @@ const loadEvents = async () => {
   } catch (err) {
     console.error('❌ Ошибка загрузки:', err)
     
-    // Определяем тип ошибки
     if (err.response?.status === 401) {
       error.value = 'Ошибка авторизации. Пожалуйста, войдите снова.'
     } else if (err.response?.status === 404) {
@@ -205,7 +339,8 @@ const loadEvents = async () => {
 }
 
 // Автоматическая загрузка при входе
-onMounted(() => {
+onMounted(async () => {
+  await loadStatuses()
   loadEvents()
 })
 </script>
@@ -508,6 +643,67 @@ onMounted(() => {
   display: flex;
   gap: 0.5rem;
   align-self: flex-end;
+}
+
+/* Панель сортировки */
+.sort-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #F8FAFC;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+}
+
+.sort-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #4B5563;
+  margin-right: 0.5rem;
+}
+
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: white;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #4B5563;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sort-btn:hover {
+  border-color: #2E80ED;
+  color: #2E80ED;
+}
+
+.sort-btn.active {
+  background: #2E80ED;
+  color: white;
+  border-color: #2E80ED;
+}
+
+.sort-btn.active:hover {
+  background: #1E6FD9;
+}
+
+.sort-icon {
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.sort-info {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: #6B7280;
+  font-style: italic;
 }
 
 .apply-btn,

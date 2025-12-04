@@ -7,6 +7,20 @@ export const EventsService = {
     console.log('✅ EventsService подключен!')
     return 'Сервис работает'
   },
+
+  async getStatuses() {
+    console.log('🏷️ Запрашиваем статусы...')
+    
+    try {
+      const response = await apiClient.get('/statuses')
+      console.log('✅ Статусы получены:', response.data)
+      return response.data
+      
+    } catch (error) {
+      console.error('❌ Ошибка получения статусов:', error)
+      throw error
+    }
+  },
   
   // Получить мероприятия с возможностью фильтрации
   async getEvents(filters = {}) {
