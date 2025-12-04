@@ -14,8 +14,8 @@
             placeholder="Введите логин"
             v-model="form.login"
           >
-          <span v-if="errors.email" class="login-form__error">
-            {{ errors.email }}
+          <span v-if="errors.login" class="login-form__error">
+            {{ errors.login }}
           </span>
         </fieldset>
         <fieldset class="login-form__fieldset p-0">
@@ -114,7 +114,7 @@ const handleLogin = async () => {
     localStorage.setItem('event_account', JSON.stringify(data.event_account))
 
     alert(`Добро пожаловать, ${data.user.first_name}!`)
-    router.push('/dashboard')
+    router.push('/events')
     
   } catch (error) {
     console.error('❌ Ошибка входа:', error)
