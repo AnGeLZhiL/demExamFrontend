@@ -4,6 +4,8 @@ import { AuthService } from '@/services/authService'
 const LoginView = () => import('@/views/auth/LoginView.vue')
 const EventsView = () => import('@/views/EventsView.vue')
 const MainLayout = () => import('@/layouts/MainLayout.vue')
+const EventDetail = () => import('@/views/EventDetail.vue')
+
 
 const routes = [
   {
@@ -23,6 +25,11 @@ const routes = [
       {
         path: '',
         component: EventsView // Это будет отображаться внутри Layout
+      },
+      {
+        path: ':id', // динамический параметр :id
+        name: 'EventDetail',
+        component: EventDetail
       }
     ]
   }

@@ -103,6 +103,7 @@
             v-for="event in sortedEvents" 
             :key="event.id" 
             class="event-card"
+            @click="goToEvent(event.id)"
             >
           <header class="event-header">
             <h2 class="event-title">{{ event.name }}</h2>
@@ -130,8 +131,10 @@
 
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { EventsService } from '@/services/eventsService'
 
+const router = useRouter()
 const events = ref([])
 const statuses = ref([])
 const loading = ref(false)
@@ -185,6 +188,11 @@ const sortedEvents = computed(() => {
     return 0
   })
 })
+
+const goToEvent = (eventId) => {
+  console.log(`Переходим к мероприятию ${eventId}`)
+  router.push(`/events/${eventId}`)
+}
 
 // Загрузка статусов из API
 const loadStatuses = async () => {
