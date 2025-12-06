@@ -122,10 +122,87 @@
     <!-- Кнопка создания -->
     <footer class="page-footer">
       <hr class="divider" />
-      <button class="create-button">
+      <button class="create-button" @click="showCreateModal = true">
         <span class="plus-icon">+</span> Создать мероприятие
       </button>
     </footer>
+    <!-- 🔴 МОДАЛЬНОЕ ОКНО СОЗДАНИЯ МЕРОПРИЯТИЯ -->
+    <Teleport to="body">
+      <div v-if="showCreateModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal">
+          <header class="modal-header">
+            <h2>Создать новое мероприятие</h2>
+            <button class="modal-close" @click="closeModal">×</button>
+          </header>
+          
+          <form @submit.prevent="createEvent" class="modal-form">
+            <div class="form-group">
+              <label for="event-name">Название мероприятия *</label>
+              <input
+                id="event-name"
+                v-model="newEvent.name"
+                type="text"
+                placeholder="Например: Демонстрационный экзамен группы 9901"
+                required
+                :disabled="creating"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label for="event-date">Дата и время проведения *</label>
+              <input
+                id="event-date"
+                v-model="newEvent.date"
+                type="datetime-local"
+                required
+                :disabled="creating"
+              />
+              <small class="form-hint">Укажите дату и время начала мероприятия</small>
+            </div>
+            
+            <div class="form-group">
+              <label for="event-status">Статус *</label>
+              <select
+                id="event-status"
+                v-model="newEvent.status_id"
+                required
+                :disabled="creating"
+              >
+                <option value="">Выберите статус</option>
+                <option v-for="status in statuses" :key="status.id" :value="status.id">
+                  {{ status.name }}
+                </option>
+              </select>
+            </div>
+            
+            <div class="form-group" v-if="createError">
+              <div class="error-message">
+                <strong>Ошибка:</strong> {{ createError }}
+              </div>
+            </div>
+            
+            <footer class="modal-footer">
+              <button 
+                type="button" 
+                class="cancel-btn" 
+                @click="closeModal"
+                :disabled="creating"
+              >
+                Отмена
+              </button>
+              <button 
+                type="submit" 
+                class="submit-btn"
+                :disabled="creating || !isFormValid"
+              >
+                <span v-if="creating">Создание...</span>
+                <span v-else>Создать мероприятие</span>
+              </button>
+            </footer>
+          </form>
+        </div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -139,6 +216,9 @@ const events = ref([])
 const statuses = ref([])
 const loading = ref(false)
 const error = ref('')
+const showCreateModal = ref(false)
+const creating = ref(false)
+const createError = ref('')
 
 // Фильтры
 const filters = ref({
@@ -192,6 +272,99 @@ const sortedEvents = computed(() => {
 const goToEvent = (eventId) => {
   console.log(`Переходим к мероприятию ${eventId}`)
   router.push(`/events/${eventId}`)
+}
+
+// Данные нового мероприятия
+const newEvent = ref({
+  name: '',
+  date: '',
+  status_id: '' // по умолчанию пустое
+})
+
+// Проверка валидности формы
+const isFormValid = computed(() => {
+  return newEvent.value.name.trim() !== '' &&
+         newEvent.value.date !== '' &&
+         newEvent.value.status_id !== ''
+})
+
+// 🔴 МЕТОД СОЗДАНИЯ МЕРОПРИЯТИЯ
+const createEvent = async () => {
+  if (!isFormValid.value) return
+  
+  try {
+    creating.value = true
+    createError.value = ''
+    
+    console.log('🔄 Начинаем создание мероприятия...')
+    
+    // Форматируем дату для API (если нужно)
+    const eventData = {
+      name: newEvent.value.name.trim(),
+      date: formatDateForAPI(newEvent.value.date),
+      status_id: parseInt(newEvent.value.status_id)
+    }
+    
+    console.log('📤 Отправляем данные:', eventData)
+    
+    // Вызываем метод из EventsService
+    const createdEvent = await EventsService.createEvent(eventData)
+    console.log('✅ Мероприятие создано успешно:', createdEvent)
+    
+    // Закрываем модальное окно
+    closeModal()
+    
+    // Обновляем список мероприятий
+    await loadEvents()
+    
+    // Простое уведомление (можно заменить на красивый toast позже)
+    alert(`✅ Мероприятие "${createdEvent.name}" успешно создано!`)
+    
+    // Опционально: автоматически переходим на созданное мероприятие
+    // router.push(`/events/${createdEvent.id}`)
+    
+  } catch (error) {
+    console.error('❌ Ошибка при создании мероприятия:', error)
+    
+    // Обработка разных типов ошибок
+    if (error.response?.status === 422) {
+      // Валидационные ошибки Laravel
+      const errors = error.response.data.errors
+      createError.value = Object.values(errors).flat().join(', ')
+    } else if (error.response?.status === 401) {
+      createError.value = 'Ошибка авторизации. Пожалуйста, войдите снова.'
+    } else if (error.message === 'Network Error') {
+      createError.value = 'Ошибка сети. Проверьте подключение к серверу.'
+    } else {
+      createError.value = error.message || 'Не удалось создать мероприятие'
+    }
+    
+  } finally {
+    creating.value = false
+  }
+}
+
+// 🔴 ФОРМАТИРОВАНИЕ ДАТЫ ДЛЯ API
+const formatDateForAPI = (dateString) => {
+  if (!dateString) return ''
+  
+  // Просто возвращаем timestamp в миллисекундах
+  const timestamp = new Date(dateString).getTime()
+  console.log('📅 Timestamp:', timestamp)
+  return timestamp
+}
+
+// 🔴 ЗАКРЫТИЕ МОДАЛЬНОГО ОКНА
+const closeModal = () => {
+  showCreateModal.value = false
+  // Сбрасываем форму
+  newEvent.value = {
+    name: '',
+    date: '',
+    status_id: ''
+  }
+  createError.value = ''
+  creating.value = false
 }
 
 // Загрузка статусов из API
@@ -377,6 +550,186 @@ onMounted(async () => {
 .page-subtitle {
   color: #666;
   font-size: 1rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #2c3e50;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0.25rem;
+  transition: color 0.2s;
+}
+
+.modal-close:hover {
+  color: #64748b;
+}
+
+.modal-form {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.95rem;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #2E80ED;
+  box-shadow: 0 0 0 3px rgba(46, 128, 237, 0.1);
+}
+
+.form-group input:disabled,
+.form-group select:disabled {
+  background-color: #f3f4f6;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.form-hint {
+  display: block;
+  margin-top: 0.25rem;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.error-message {
+  background: #fef2f2;
+  color: #dc2626;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #fca5a5;
+  font-size: 0.9rem;
+}
+
+.error-message strong {
+  font-weight: 600;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eef2f7;
+}
+
+.cancel-btn,
+.submit-btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.cancel-btn {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.submit-btn {
+  background: #2E80ED;
+  color: white;
+}
+
+.submit-btn:hover:not(:disabled) {
+  background: #1E6FD9;
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #94a3b8;
 }
 
 /* Основной контент */

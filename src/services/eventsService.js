@@ -145,6 +145,82 @@ export const EventsService = {
     }
   },
 
+  // Создать новое мероприятие
+  async createEvent(eventData) {
+    console.log('='.repeat(40))
+    console.log('🔄 Создаем новое мероприятие...')
+    console.log('📋 Данные для создания:', eventData)
+    
+    // Проверяем токен
+    const token = localStorage.getItem('auth_token')
+    console.log('🔑 Токен из localStorage:', token ? token.substring(0, 20) + '...' : 'НЕТ')
+    
+    try {
+      console.log('📡 Отправляем POST запрос на /events')
+      console.log('   URL:', '/events')
+      console.log('   Данные:', eventData)
+      
+      const response = await apiClient.post('/events', eventData)
+      
+      console.log('✅ УСПЕХ! Статус:', response.status)
+      console.log('📋 Созданное мероприятие:', response.data)
+      
+      return response.data
+      
+    } catch (error) {
+      console.error('❌ ОШИБКА создания мероприятия:')
+      
+      if (error.response) {
+        console.error('   📡 Сервер ответил:')
+        console.error('   Статус:', error.response.status)
+        console.error('   URL запроса:', error.config?.url)
+        console.error('   Данные ошибки:', error.response.data)
+        
+        if (error.response.status === 401) {
+          console.error('   ⚠️  ОШИБКА 401: Неавторизован!')
+          console.error('   Проверьте:')
+          console.error('   1. Войдите в систему')
+          console.error('   2. Токен может быть просрочен')
+        } else if (error.response.status === 422) {
+          console.error('   ⚠️  ОШИБКА 422: Валидация не пройдена!')
+          console.error('   Ошибки валидации:', error.response.data.errors)
+        }
+      } else if (error.request) {
+        console.error('   🌐 Нет ответа от сервера')
+        console.error('   Проверьте:')
+        console.error('   1. Запущен ли Laravel сервер?')
+        console.error('   2. Правильный ли URL?')
+      } else {
+        console.error('   ⚙️ Ошибка настройки:', error.message)
+      }
+      
+      throw error
+    }
+  },
+
+  // Обновить мероприятие
+    async updateEvent(id, eventData) {
+        console.log('='.repeat(40))
+        console.log(`🔄 Обновляем мероприятие ID: ${id}`)
+        console.log('📋 Данные для обновления:', eventData)
+        
+        try {
+            const response = await apiClient.put(`/events/${id}`, eventData)
+            console.log(`✅ Мероприятие ${id} обновлено:`, response.data)
+            return response.data
+            
+        } catch (error) {
+            console.error(`❌ Ошибка обновления мероприятия ${id}:`, error)
+            
+            if (error.response) {
+            console.error('Статус:', error.response.status)
+            console.error('Данные:', error.response.data)
+            }
+            
+            throw error
+        }
+    },
+
   // Получить модули мероприятия
   async getEventModules(eventId) {
     console.log('='.repeat(40))
@@ -233,5 +309,28 @@ async getEventAccounts(eventId, filters = {}) {
     
     throw error
   }
-}
+},
+
+// удалить мероприятие
+  deleteEvent: async (id) => {
+    try {
+      console.log(`🗑️ Отправляем запрос на удаление мероприятия ${id}...`)
+      const response = await apiClient.delete(`/events/${id}`)
+      console.log('✅ Мероприятие удалено:', response.data)
+      return response.data
+    } catch (error) {
+      console.error(`❌ Ошибка удаления мероприятия ${id}:`, error)
+      
+      // Более информативная ошибка
+      if (error.response?.status === 404) {
+        throw new Error('Мероприятие не найдено')
+      } else if (error.response?.status === 403) {
+        throw new Error('Нет прав на удаление мероприятия')
+      } else if (error.response?.status === 409) {
+        throw new Error('Нельзя удалить мероприятие с активными модулями или пользователями')
+      } else {
+        throw error
+      }
+    }
+  }
 }

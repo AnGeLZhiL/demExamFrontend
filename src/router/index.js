@@ -15,21 +15,24 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: LoginView
+    component: LoginView,
+    meta: { requiresAuth: false }
   },
   {
     path: '/events',
-    name: 'Events',
     component: MainLayout, // Сначала покажем Layout
+    meta: { requiresAuth: true },
     children: [
       {
-        path: '',
-        component: EventsView // Это будет отображаться внутри Layout
+        path: '', // пустой путь = родительский /events
+        name: 'Events', // 🔴 ПЕРЕНОСИМ ИМЯ СЮДА
+        component: EventsView
       },
       {
         path: ':id', // динамический параметр :id
         name: 'EventDetail',
-        component: EventDetail
+        component: EventDetail,
+        props: true
       }
     ]
   }

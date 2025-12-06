@@ -5,6 +5,15 @@
       <button @click="goBack" class="back-button">
         ← К мероприятиям
       </button>
+      <!-- 🔴 КНОПКИ ДЕЙСТВИЙ -->
+        <div class="header-actions">
+          <button @click="editEvent" class="action-btn edit-event-btn">
+            ✏️ Редактировать
+          </button>
+          <button @click="deleteEvent" class="action-btn delete-event-btn">
+            🗑️ Удалить
+          </button>
+        </div>
       <h1 class="event-name">{{ event?.name || 'Загрузка...' }}</h1>
       <div class="event-header-info">
         <time class="event-date">{{ formatDate(event?.date) }}</time>
@@ -248,11 +257,86 @@
         </table>
       </section>
     </section>
+    <Teleport to="body">
+    <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
+        <div class="modal">
+        <header class="modal-header">
+            <h2>Редактировать мероприятие</h2>
+            <button class="modal-close" @click="closeEditModal">×</button>
+        </header>
+        
+        <form @submit.prevent="updateEvent" class="modal-form">
+            <div class="form-group">
+            <label for="edit-event-name">Название мероприятия *</label>
+            <input
+                id="edit-event-name"
+                v-model="editEventData.name"
+                type="text"
+                placeholder="Введите название"
+                required
+                :disabled="updating"
+            />
+            </div>
+            
+            <div class="form-group">
+            <label for="edit-event-date">Дата и время проведения *</label>
+            <input
+                id="edit-event-date"
+                v-model="editEventData.date"
+                type="datetime-local"
+                required
+                :disabled="updating"
+            />
+            </div>
+            
+            <div class="form-group">
+            <label for="edit-event-status">Статус *</label>
+            <select
+                id="edit-event-status"
+                v-model="editEventData.status_id"
+                required
+                :disabled="updating"
+            >
+                <option value="">Выберите статус</option>
+                <option v-for="status in allStatuses" :key="status.id" :value="status.id">
+                {{ status.name }}
+                </option>
+            </select>
+            </div>
+            
+            <div class="form-group" v-if="editError">
+            <div class="error-message">
+                <strong>Ошибка:</strong> {{ editError }}
+            </div>
+            </div>
+            
+            <footer class="modal-footer">
+            <button 
+                type="button" 
+                class="cancel-btn" 
+                @click="closeEditModal"
+                :disabled="updating"
+            >
+                Отмена
+            </button>
+            <button 
+                type="submit" 
+                class="submit-btn"
+                :disabled="updating || !isEditFormValid"
+            >
+                <span v-if="updating">Сохранение...</span>
+                <span v-else>Сохранить изменения</span>
+            </button>
+            </footer>
+        </form>
+        </div>
+    </div>
+    </Teleport>
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { EventsService } from '@/services/eventsService'
 
@@ -264,6 +348,189 @@ const eventId = route.params.id
 const event = ref(null)
 const loadingEvent = ref(true)
 const eventError = ref('')
+
+// 🔴 ПЕРЕМЕННЫЕ ДЛЯ РЕДАКТИРОВАНИЯ
+const showEditModal = ref(false)
+const updating = ref(false)
+const editError = ref('')
+const editEventData = ref({
+  name: '',
+  date: '',
+  status_id: ''
+})
+const allStatuses = ref([]) // список всех статусов для селекта
+
+const handleKeydown = (e) => {
+  if (e.key === 'Escape' && showEditModal.value) {
+        closeEditModal()
+    }
+    }
+
+    onMounted(() => {
+    window.addEventListener('keydown', handleKeydown)
+    })
+
+    onUnmounted(() => {
+    window.removeEventListener('keydown', handleKeydown)
+})
+
+// 🔴 ЗАГРУЗКА ВСЕХ СТАТУСОВ
+const loadStatuses = async () => {
+  try {
+    const statuses = await EventsService.getStatuses()
+    allStatuses.value = statuses
+  } catch (error) {
+    console.error('Ошибка загрузки статусов:', error)
+    // Fallback
+    allStatuses.value = [
+      { id: 1, name: 'Запланирован' },
+      { id: 2, name: 'Активен' },
+      { id: 3, name: 'Завершен' }
+    ]
+  }
+}
+
+// 🔴 ОТКРЫТИЕ МОДАЛЬНОГО ОКНА РЕДАКТИРОВАНИЯ
+const openEditModal = () => {
+
+    console.log('🟢 openEditModal вызвана!', event.value)  // Добавьте эту строку
+  if (!event.value) {
+    console.warn('⚠️ event.value пуст!')
+    return
+  }
+  
+  // Заполняем форму текущими данными
+  editEventData.value = {
+    name: event.value.name,
+    date: formatDateForEdit(event.value.date), // форматируем для datetime-local
+    status_id: event.value.status_id.toString()
+  }
+  
+  showEditModal.value = true
+}
+
+// 🔴 ФОРМАТИРОВАНИЕ ДАТЫ ДЛЯ ПОЛЯ datetime-local
+const formatDateForEdit = (dateString) => {
+  if (!dateString) return ''
+  
+  // Преобразуем из "YYYY-MM-DD HH:MM:SS" в "YYYY-MM-DDTHH:MM"
+  const date = new Date(dateString)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+// 🔴 ПРОВЕРКА ВАЛИДНОСТИ ФОРМЫ
+const isEditFormValid = computed(() => {
+  return editEventData.value.name.trim() !== '' &&
+         editEventData.value.date !== '' &&
+         editEventData.value.status_id !== ''
+})
+
+const formatDateForAPI = (dateString) => {
+  if (!dateString) return ''
+  
+  // Преобразуем из "YYYY-MM-DDTHH:MM" в "YYYY-MM-DD HH:MM:SS"
+  const date = new Date(dateString)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  
+  return `${year}-${month}-${day} ${hours}:${minutes}:00`
+}
+
+const validateEditForm = () => {
+  const errors = []
+  
+  if (!editEventData.value.name.trim()) {
+    errors.push('Название мероприятия обязательно')
+  }
+  
+  if (!editEventData.value.date) {
+    errors.push('Дата проведения обязательна')
+  } else {
+    const selectedDate = new Date(editEventData.value.date)
+    if (selectedDate < new Date()) {
+      errors.push('Дата проведения не может быть в прошлом')
+    }
+  }
+  
+  if (!editEventData.value.status_id) {
+    errors.push('Статус обязателен')
+  }
+  
+  return errors
+}
+
+
+// 🔴 ОБНОВЛЕНИЕ МЕРОПРИЯТИЯ
+const updateEvent = async () => {
+    const validationErrors = validateEditForm()
+    if (validationErrors.length > 0) {
+        editError.value = validationErrors.join(', ')
+        return
+    }
+
+    if (!isEditFormValid.value) return
+    
+    try {
+        updating.value = true
+        editError.value = ''
+        
+        // Форматируем данные для API
+        const updateData = {
+        name: editEventData.value.name.trim(),
+        date: formatDateForAPI(editEventData.value.date), // тот же метод что и для создания
+        status_id: parseInt(editEventData.value.status_id)
+        }
+        
+        console.log('🔄 Обновляем мероприятие:', updateData)
+        
+        const updatedEvent = await EventsService.updateEvent(eventId, updateData)
+        console.log('✅ Мероприятие обновлено:', updatedEvent)
+        
+        // Обновляем данные на странице
+        event.value = updatedEvent
+        
+        // Закрываем модальное окно
+        closeEditModal()
+        
+        // Уведомление
+        alert('✅ Изменения сохранены!')
+        
+    } catch (error) {
+        console.error('❌ Ошибка обновления мероприятия:', error)
+        
+        if (error.response?.status === 422) {
+        editError.value = 'Проверьте правильность заполнения полей'
+        } else if (error.response?.status === 401) {
+        editError.value = 'Ошибка авторизации'
+        } else {
+        editError.value = error.message || 'Не удалось обновить мероприятие'
+        }
+        
+    } finally {
+        updating.value = false
+    }
+}
+
+// 🔴 ЗАКРЫТИЕ МОДАЛЬНОГО ОКНА
+const closeEditModal = () => {
+  showEditModal.value = false
+  editEventData.value = {
+    name: '',
+    date: '',
+    status_id: ''
+  }
+  editError.value = ''
+  updating.value = false
+}
 
 // Данные модулей
 const modules = ref([])
@@ -302,6 +569,62 @@ const uniqueRoles = computed(() => {
     .filter(Boolean)
   return [...new Set(roles)].sort()
 })
+
+// 🔴 МЕТОД РЕДАКТИРОВАНИЯ МЕРОПРИЯТИЯ
+const editEvent = () => {
+  console.log('🟡 editEvent вызван, event:', event.value)
+  
+  if (!event.value) {
+    console.warn('❌ event.value пуст, данные не загружены')
+    alert('Данные мероприятия еще не загружены. Пожалуйста, подождите.')
+    return
+  }
+  
+  openEditModal()
+}
+
+// 🔴 МЕТОД УДАЛЕНИЯ МЕРОПРИЯТИЯ
+const deleteEvent = async () => {
+  if (!event.value) {
+    console.error('❌ event.value пуст')
+    return
+  }
+  
+  const eventName = event.value.name || 'это мероприятие'
+  
+  if (!confirm(`Вы уверены, что хотите удалить мероприятие "${eventName}"?`)) {
+    return
+  }
+  
+  try {
+    console.log(`🗑️ Удаляем мероприятие ${eventId}...`)
+    
+    // ✅ eventId, а не eventId.value (если eventId уже строка)
+    await EventsService.deleteEvent(eventId)
+    
+    alert(`✅ Мероприятие "${eventName}" успешно удалено`)
+    
+    // Перенаправляем на страницу мероприятий
+    router.push('/events')
+    
+  } catch (error) {
+    console.error('❌ Ошибка удаления мероприятия:', error)
+    
+    // Более информативное сообщение об ошибке
+    let errorMessage = 'Не удалось удалить мероприятие.'
+    
+    if (error.message.includes('не найдено')) {
+      errorMessage = 'Мероприятие не найдено. Возможно, оно уже было удалено.'
+    } else if (error.message.includes('прав')) {
+      errorMessage = 'У вас нет прав на удаление этого мероприятия.'
+    } else if (error.message.includes('активными')) {
+      errorMessage = 'Нельзя удалить мероприятие, к которому привязаны модули или пользователи.'
+    }
+    
+    alert(`❌ ${errorMessage}\n\nДетали: ${error.message}`)
+  }
+}
+
 
 // Отфильтрованные пользователи (клиентская фильтрация)
 const filteredUsers = computed(() => {
@@ -579,9 +902,10 @@ const loadAllData = async () => {
   ])
 }
 
-onMounted(() => {
+onMounted(async () => {
   console.log(`🚀 Загружаем детальную страницу мероприятия ID: ${eventId}`)
-  loadAllData()
+  await loadStatuses() // загружаем статусы
+  await loadAllData()
 })
 </script>
 
@@ -655,6 +979,51 @@ onMounted(() => {
 .status-completed {
   background: #F3F4F6;
   color: #374151;
+}
+
+/* 🔴 СТИЛИ ДЛЯ КНОПОК В ЗАГОЛОВКЕ */
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.action-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.edit-event-btn {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.edit-event-btn:hover {
+  background: #e5e7eb;
+}
+
+.delete-event-btn {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.delete-event-btn:hover {
+  background: #fee2e2;
 }
 
 /* Секции */
@@ -1143,5 +1512,198 @@ onMounted(() => {
   background: #f8fafc;
   border-color: #d1d5db;
   color: #6b7280;
+}
+
+/* 🔴 СТИЛИ МОДАЛЬНОГО ОКНА */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #2c3e50;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0.25rem;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.modal-close:hover {
+  color: #374151;
+  background-color: #f3f4f6;
+}
+
+.modal-form {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.9rem;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #2E80ED;
+  box-shadow: 0 0 0 3px rgba(46, 128, 237, 0.1);
+}
+
+.form-group input:disabled,
+.form-group select:disabled {
+  background-color: #f9fafb;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.error-message {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.cancel-btn,
+.submit-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+}
+
+.cancel-btn {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.submit-btn {
+  background: #2E80ED;
+  color: white;
+}
+
+.submit-btn:hover:not(:disabled) {
+  background: #1E6FD9;
+}
+
+.cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.submit-btn:disabled {
+    position: relative;
+    color: transparent;
+}
+
+.submit-btn:disabled::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: button-spinner 0.8s linear infinite;
+}
+
+@keyframes button-spinner {
+  to { transform: rotate(360deg); }
+}
+
+/* Анимации */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 </style>
