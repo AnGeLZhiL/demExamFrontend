@@ -243,7 +243,7 @@
               <td>{{ getLoginForUser(user) }}</td>
               <td>{{ getPasswordForUser(user) }}</td>
               <td>{{ user.group?.number || '-' }}</td>
-              <td>{{ user.role?.name || '-' }}</td>
+              <td>{{ user.role_in_event?.name || '-' }}</td>
               <td class="actions">
                 <button class="action-btn edit-btn" @click="editUser(user)">
                   Редактировать
@@ -565,7 +565,7 @@ const uniqueGroups = computed(() => {
 
 const uniqueRoles = computed(() => {
   const roles = users.value
-    .map(user => user.role?.name)
+    .map(user => user.role_in_event?.name) // ← ИЗМЕНИТЬ
     .filter(Boolean)
   return [...new Set(roles)].sort()
 })
@@ -643,8 +643,8 @@ const filteredUsers = computed(() => {
       return false
     }
     
-    // Фильтр по роли
-    if (userFilters.value.role && user.role?.name !== userFilters.value.role) {
+    // 🔴 ФИЛЬТР ПО РОЛИ (теперь role_in_event)
+    if (userFilters.value.role && user.role_in_event?.name !== userFilters.value.role) {
       return false
     }
     
@@ -672,8 +672,9 @@ const sortedUsers = computed(() => {
         break
         
       case 'role':
-        aValue = a.role?.name || ''
-        bValue = b.role?.name || ''
+        // 🔴 СОРТИРОВКА ПО РОЛИ (теперь role_in_event)
+        aValue = a.role_in_event?.name || ''
+        bValue = b.role_in_event?.name || ''
         break
         
       default:
@@ -790,14 +791,12 @@ const onSearchInput = () => {
 
 // Поиск логина для пользователя
 const getLoginForUser = (user) => {
-  const account = eventAccounts.value.find(acc => acc.user_id === user.id)
-  return account?.login || '—'
+  return user.login || '—'
 }
 
 // Поиск пароля для пользователя
 const getPasswordForUser = (user) => {
-  const account = eventAccounts.value.find(acc => acc.user_id === user.id)
-  return account?.password ? '••••••••' : '—'
+  return user.login ? '••••••••' : '—'
 }
 
 // Методы для сортировки
