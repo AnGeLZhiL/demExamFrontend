@@ -1,12 +1,12 @@
 <template>
   <main class="event-detail-page">
     <!-- Хлебные крошки и кнопка назад -->
-    <header class="page-header">
+    <header class="page-header ">
       <button @click="goBack" class="back-button">
         ← К мероприятиям
       </button>
       <!-- 🔴 КНОПКИ ДЕЙСТВИЙ -->
-        <div class="header-actions">
+        <div class="header-actions header-top">
           <button @click="editEvent" class="action-btn edit-event-btn">
             ✏️ Редактировать
           </button>
@@ -74,7 +74,7 @@
           </article>
         </section>
       </section>
-      </div>
+
 
       <!-- Секция пользователей -->
       <section class="users-section">
@@ -85,6 +85,22 @@
           <button class="add-button" @click="addUser">
             + Добавить участника
           </button>
+          <!-- Кнопка генерации мест -->
+            <div class="generate-seats-wrapper" v-if="hasParticipants">
+            <button 
+                class="generate-seats-btn"
+                @click="generateSeats"
+                :disabled="loadingUsers"
+            >
+                🎲 Назначить места
+                <span class="participants-count">
+                ({{ participantsCount }} уч.)
+                </span>
+            </button>
+            <small class="hint">
+                Участники получат номера 1-{{ participantsCount }}
+            </small>
+            </div>
         </div>
       </header>
 
@@ -181,11 +197,45 @@
             {{ sortDirection === 'asc' ? '↑' : '↓' }}
           </span>
         </button>
+
+        <button 
+            @click="setSortBy('seat_number')" 
+            class="sort-btn"
+            :class="{ active: usersSortBy === 'seat_number' }"
+            >
+            По месту
+            <span v-if="usersSortBy === 'seat_number'" class="sort-icon">
+                {{ sortDirection === 'asc' ? '↑' : '↓' }}
+            </span>
+        </button>
         
         <span class="sort-info">
           Найдено: {{ filteredUsers.length }} из {{ users.length }}
         </span>
       </section>
+
+      <!-- 🔴 ДОБАВЬТЕ ЭТУ СЕКЦИЮ ДЛЯ КНОПКИ ПОКАЗА ПАРОЛЕЙ -->
+        <section class="password-controls" v-if="hasAccounts">
+            <button 
+            @click="togglePasswords" 
+            class="toggle-passwords-btn"
+            :class="{ 'active': showPasswords }"
+            type="button"
+            >
+            <span v-if="!showPasswords">👁️ Показать все пароли</span>
+            <span v-else>🙈 Скрыть все пароли</span>
+            <span class="password-hint" v-if="!showPasswords">
+                (будут скрыты через 30 секунд)
+            </span>
+            </button>
+            
+            <div class="password-info" v-if="showPasswords">
+            <span class="password-warning">⚠️ Все пароли видны</span>
+            <span class="password-timer" v-if="passwordTimer > 0">
+                Автоматическое скрытие через: {{ passwordTimer }} сек.
+            </span>
+            </div>
+        </section>
 
       <!-- Состояния загрузки -->
       <section v-if="loadingUsers" class="loading-state">
@@ -232,6 +282,12 @@
                   {{ sortDirection === 'asc' ? '↑' : '↓' }}
                 </span>
               </th>
+              <th @click="setSortBy('seat_number')" :class="{ 'sorted': usersSortBy === 'seat_number' }">
+                    Место
+                    <span v-if="usersSortBy === 'seat_number'" class="sort-indicator">
+                        {{ sortDirection === 'asc' ? '↑' : '↓' }}
+                    </span>
+                </th>
               <th>Действия</th>
             </tr>
           </thead>
@@ -241,9 +297,34 @@
                 {{ user.last_name }} {{ user.first_name }} {{ user.middle_name || '' }}
               </td>
               <td>{{ getLoginForUser(user) }}</td>
-              <td>{{ getPasswordForUser(user) }}</td>
+              <td :class="['password-cell', getPasswordCellClass(user)]">
+                    <template v-if="user.login">
+                        <span class="password-value">
+                        {{ getPasswordForUser(user) }}
+                        </span>
+                        <button 
+                        v-if="!(showPasswords || visiblePasswords[user.id])"
+                        class="show-one-btn"
+                        @click.stop="showUserPassword(user.id)"
+                        title="Показать пароль (будет скрыт через 30 секунд)"
+                        >
+                        👁️
+                        </button>
+                    </template>
+                    <span v-else>—</span>
+                </td>
               <td>{{ user.group?.number || '-' }}</td>
               <td>{{ user.role_in_event?.name || '-' }}</td>
+              <td :class="{ 'sorted-cell': usersSortBy === 'seat_number' }">
+                <!-- Место показываем только для участников -->
+                <template v-if="isParticipant(user)">
+                <span v-if="user.seat_number" class="seat-badge">
+                    {{ user.seat_number }}
+                </span>
+                <span v-else class="no-seat">-</span>
+                </template>
+                <span v-else class="not-applicable">—</span>
+            </td>
               <td class="actions">
                 <button class="action-btn edit-btn" @click="editUser(user)">
                   Редактировать
@@ -257,6 +338,7 @@
         </table>
       </section>
     </section>
+    </div>
     <Teleport to="body">
     <div v-if="showEditModal" class="modal-overlay" @click.self="closeEditModal">
         <div class="modal">
@@ -332,6 +414,20 @@
         </div>
     </div>
     </Teleport>
+    <SimpleAddUserModal
+        :show="showAddUserModal"
+        @close="showAddUserModal = false"
+        :event-id="eventId"
+        @user-added="handleUserAdded"
+    />
+    <EditUserModal
+        v-if="selectedUser"
+        :show="showEditUserModal"
+        :user="selectedUser"
+        :event-id="eventId"
+        @close="showEditUserModal = false"
+        @saved="handleUserSaved"
+    />
   </main>
 </template>
 
@@ -339,6 +435,8 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { EventsService } from '@/services/eventsService'
+import SimpleAddUserModal from '@/components/SimpleAddUserModal.vue'
+import EditUserModal from '@/components/EditUserModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -360,6 +458,13 @@ const editEventData = ref({
 })
 const allStatuses = ref([]) // список всех статусов для селекта
 
+const showEditUserModal = ref(false)
+const selectedUser = ref(null)
+
+const hasAccounts = computed(() => {
+  return users.value.some(user => user.login)
+})
+
 const handleKeydown = (e) => {
   if (e.key === 'Escape' && showEditModal.value) {
         closeEditModal()
@@ -372,7 +477,91 @@ const handleKeydown = (e) => {
 
     onUnmounted(() => {
     window.removeEventListener('keydown', handleKeydown)
+    clearTimeout(searchTimeout)
+    if (passwordTimerInterval) {
+        clearInterval(passwordTimerInterval)
+    }
 })
+
+const generateSeats = async () => {
+  // Получаем только участников
+  const participants = users.value
+    .filter(user => {
+      const roleName = user.role_in_event?.name?.toLowerCase() || ''
+      return roleName.includes('участник') || roleName === 'участник'
+    })
+    .sort((a, b) => {
+      // Сортируем по ФИО для последовательной нумерации
+      const nameA = `${a.last_name} ${a.first_name}`.toLowerCase()
+      const nameB = `${b.last_name} ${b.first_name}`.toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+  
+  if (participants.length === 0) {
+    alert('❌ Нет участников для генерации мест')
+    return
+  }
+  
+  // Подтверждение
+  const message = `Назначить места ${participants.length} участникам?\n\n` +
+                 `Участники получат номера мест от 1 до ${participants.length}\n` +
+                 `в алфавитном порядке по ФИО.\n` +
+                 `Существующие места будут перезаписаны.`
+  
+  if (!confirm(message)) {
+    return
+  }
+  
+  try {
+    console.log(`🎲 Генерируем места для ${participants.length} участников...`)
+    
+    // Создаем обновления с порядковыми номерами
+    const updates = participants.map((user, index) => ({
+      userId: user.id,
+      userName: `${user.last_name} ${user.first_name}`,
+      seatNumber: (index + 1).toString(), // Места 1, 2, 3...
+      currentSeat: user.seat_number || 'не назначено'
+    }))
+    
+    // Показываем превью
+    const preview = updates.map(u => 
+      `${u.seatNumber}. ${u.userName} (было: ${u.currentSeat})`
+    ).join('\n')
+    
+    if (!confirm(`Будут назначены места:\n\n${preview}\n\nПродолжить?`)) {
+      return
+    }
+    
+    // Выполняем обновления
+    let successCount = 0
+    let errorCount = 0
+    
+    for (const update of updates) {
+      try {
+        await EventsService.updateUserSeat(eventId, update.userId, update.seatNumber)
+        console.log(`✅ ${update.seatNumber}. ${update.userName}`)
+        successCount++
+      } catch (error) {
+        console.error(`❌ Ошибка для ${update.userName}:`, error)
+        errorCount++
+      }
+    }
+    
+    // Результат
+    if (errorCount === 0) {
+      alert(`✅ Успешно назначены места для ${successCount} участников!`)
+    } else {
+      alert(`⚠️ Назначены места для ${successCount} участников, ошибок: ${errorCount}`)
+    }
+    
+    // Перезагружаем данные
+    await loadUsers()
+    
+  } catch (error) {
+    console.error('❌ Общая ошибка:', error)
+    alert('❌ Не удалось сгенерировать места')
+  }
+}
 
 // 🔴 ЗАГРУЗКА ВСЕХ СТАТУСОВ
 const loadStatuses = async () => {
@@ -413,15 +602,13 @@ const openEditModal = () => {
 const formatDateForEdit = (dateString) => {
   if (!dateString) return ''
   
-  // Преобразуем из "YYYY-MM-DD HH:MM:SS" в "YYYY-MM-DDTHH:MM"
   const date = new Date(dateString)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
   
-  return `${year}-${month}-${day}T${hours}:${minutes}`
+  // Проверка на валидность даты
+  if (isNaN(date.getTime())) return ''
+  
+  // Более простой способ
+  return date.toISOString().slice(0, 16)
 }
 
 // 🔴 ПРОВЕРКА ВАЛИДНОСТИ ФОРМЫ
@@ -456,9 +643,12 @@ const validateEditForm = () => {
     errors.push('Дата проведения обязательна')
   } else {
     const selectedDate = new Date(editEventData.value.date)
-    if (selectedDate < new Date()) {
-      errors.push('Дата проведения не может быть в прошлом')
+    if (selectedDate < new Date() && editEventData.value.status_id !== '3') {
+        errors.push('Дата проведения не может быть в прошлом для активных мероприятий')
     }
+    // if (selectedDate < new Date()) {
+    //   errors.push('Дата проведения не может быть в прошлом')
+    // }
   }
   
   if (!editEventData.value.status_id) {
@@ -545,12 +735,103 @@ const usersError = ref('')
 const usersSortBy = ref('last_name')
 const sortDirection = ref('asc')
 
+// Состояния для паролей
+const showPasswords = ref(false)
+const visiblePasswords = ref({}) // { userId: true }
+const passwordTimer = ref(0)
+let passwordTimerInterval = null
+
+// Переключить все пароли
+const togglePasswords = () => {
+  if (!showPasswords.value) {
+    if (!confirm('⚠️  Внимание!\n\nПоказать пароли всех пользователей?\n\nПароли будут видны в течение 30 секунд.\n\nЭто действие может быть небезопасным.\n\nПродолжить?')) {
+      return
+    }
+    
+    showPasswords.value = true
+    passwordTimer.value = 30
+    
+    // Запускаем таймер
+    passwordTimerInterval = setInterval(() => {
+      if (passwordTimer.value > 0) {
+        passwordTimer.value--
+      } else {
+        clearInterval(passwordTimerInterval)
+        showPasswords.value = false
+        visiblePasswords.value = {}
+        alert('⏰ Пароли автоматически скрыты для безопасности.')
+      }
+    }, 1000)
+    
+  } else {
+    showPasswords.value = false
+    visiblePasswords.value = {}
+    clearInterval(passwordTimerInterval)
+    passwordTimer.value = 0
+  }
+}
+
+// Показать пароль конкретного пользователя
+const showUserPassword = (userId) => {
+  if (confirm('Показать пароль для этого пользователя?')) {
+    visiblePasswords.value[userId] = true
+    
+    // Автоматически скрыть через 30 секунд
+    setTimeout(() => {
+      visiblePasswords.value[userId] = false
+    }, 30000)
+  }
+}
+
+// Получить пароль для отображения
+const getPasswordForUser = (user) => {
+  console.log('🔍 getPasswordForUser вызывается для:', {
+    userId: user.id,
+    userName: `${user.last_name} ${user.first_name}`,
+    login: user.login,
+    hasLogin: !!user.login,
+    password: user.password,
+    hasPassword: !!user.password,
+    account_data: user.account_data
+  })
+  
+  if (!user.login) {
+    console.log('   ❌ Нет логина, возвращаем —')
+    return '—'
+  }
+  
+  const shouldShow = showPasswords.value || visiblePasswords.value[user.id]
+  console.log('   shouldShow:', shouldShow)
+  
+  if (shouldShow) {
+    // Теперь password должен содержать сырой пароль
+    const password = user.password || user.plain_password || user.credentials?.password || '—'
+    console.log('   ✅ Показываем пароль:', password)
+    return password
+  } else {
+    console.log('   🔒 Скрываем пароль')
+    return '••••••••'
+  }
+}
+
+// Получить класс для ячейки пароля
+const getPasswordCellClass = (user) => {
+  if (!user.login) return ''
+  
+  const shouldShow = showPasswords.value || visiblePasswords.value[user.id]
+  return shouldShow ? 'password-visible' : 'password-hidden'
+}
+
 // Фильтры пользователей
 const userFilters = ref({
   search: '',
   group: '',
   role: ''
 })
+
+//  состояние для модалки:
+const showAddUserModal = ref(false)
+const allRoles = ref([]) // для хранения списка ролей
 
 // Дебаунс для поиска
 let searchTimeout = null
@@ -565,9 +846,19 @@ const uniqueGroups = computed(() => {
 
 const uniqueRoles = computed(() => {
   const roles = users.value
-    .map(user => user.role_in_event?.name) // ← ИЗМЕНИТЬ
+    .map(user => user.role_in_event?.name || user.role?.name)
     .filter(Boolean)
   return [...new Set(roles)].sort()
+})
+
+// Количество участников
+const participantsCount = computed(() => {
+  return users.value.filter(isParticipant).length
+})
+
+// Есть ли участники
+const hasParticipants = computed(() => {
+  return participantsCount.value > 0
 })
 
 // 🔴 МЕТОД РЕДАКТИРОВАНИЯ МЕРОПРИЯТИЯ
@@ -657,9 +948,10 @@ const sortedUsers = computed(() => {
   if (!filteredUsers.value.length) return []
   
   return [...filteredUsers.value].sort((a, b) => {
+    // Определяем значения для сортировки
     let aValue, bValue
+    let isNumeric = false
     
-    // Выбираем поле для сортировки
     switch (usersSortBy.value) {
       case 'last_name':
         aValue = `${a.last_name} ${a.first_name}`.toLowerCase()
@@ -672,32 +964,57 @@ const sortedUsers = computed(() => {
         break
         
       case 'role':
-        // 🔴 СОРТИРОВКА ПО РОЛИ (теперь role_in_event)
         aValue = a.role_in_event?.name || ''
         bValue = b.role_in_event?.name || ''
         break
+        
+      case 'seat_number':
+        // Специальная логика для сортировки по месту
+        return sortBySeatNumber(a, b, sortDirection.value)
         
       default:
         return 0
     }
     
-    // Приводим к строке для сравнения
-    aValue = String(aValue).toLowerCase()
-    bValue = String(bValue).toLowerCase()
-    
-    // Сравниваем значения с учетом направления сортировки
-    let comparison = 0
-    
-    if (aValue < bValue) {
-      comparison = -1
-    } else if (aValue > bValue) {
-      comparison = 1
-    }
-    
-    // Если сортируем по убыванию, инвертируем результат
-    return sortDirection.value === 'desc' ? -comparison : comparison
+    // Стандартная текстовая сортировка
+    return sortTextValues(aValue, bValue, sortDirection.value)
   })
 })
+
+// Вспомогательные функции
+const sortBySeatNumber = (a, b, direction) => {
+  const aIsParticipant = isParticipant(a)
+  const bIsParticipant = isParticipant(b)
+  
+  // Участники всегда выше не-участников
+  if (aIsParticipant && !bIsParticipant) return -1
+  if (!aIsParticipant && bIsParticipant) return 1
+  
+  // Если оба участники
+  if (aIsParticipant && bIsParticipant) {
+    const aSeat = parseInt(a.seat_number) || 99999
+    const bSeat = parseInt(b.seat_number) || 99999
+    
+    // Числовая сортировка
+    if (direction === 'asc') {
+      return aSeat - bSeat
+    } else {
+      return bSeat - aSeat
+    }
+  }
+  
+  // Если оба не участники - сохраняем порядок
+  return 0
+}
+
+const sortTextValues = (a, b, direction) => {
+  a = String(a).toLowerCase()
+  b = String(b).toLowerCase()
+  
+  if (a < b) return direction === 'asc' ? -1 : 1
+  if (a > b) return direction === 'asc' ? 1 : -1
+  return 0
+}
 
 // Загрузка данных мероприятия
 const loadEvent = async () => {
@@ -731,8 +1048,12 @@ const loadModules = async () => {
 const loadUsers = async () => {
   try {
     loadingUsers.value = true
+    usersError.value = ''
     
-    // Подготавливаем фильтры для API
+    console.log('='.repeat(40))
+    console.log('🔄 Начинаем загрузку пользователей...')
+    
+    // 1. Подготавливаем фильтры для API
     const apiFilters = {}
     
     // Если нужно фильтровать по ролям на сервере
@@ -740,18 +1061,72 @@ const loadUsers = async () => {
       apiFilters.roles = userFilters.value.role
     }
     
-    // Загружаем пользователей с фильтрами
-    const usersData = await EventsService.getEventUsers(eventId, apiFilters)
-    users.value = usersData
-    console.log('✅ Пользователи загружены:', users.value)
+    console.log('📋 Используем API фильтры:', apiFilters)
     
-    // Загружаем учетные записи
-    try {
-      const accountsData = await EventsService.getEventAccounts(eventId, apiFilters)
-      eventAccounts.value = accountsData
-      console.log('✅ Учетные записи загружены:', eventAccounts.value)
-    } catch (accountsError) {
-      console.warn('⚠️ Не удалось загрузить учетные записи:', accountsError)
+    // 2. Загружаем пользователей с фильтрами
+    console.log(`📡 Запрашиваем пользователей мероприятия ${eventId}...`)
+    const usersData = await EventsService.getEventUsers(eventId, apiFilters)
+    console.log(`✅ Пользователи мероприятия ${eventId} получены:`, usersData)
+    console.log(`   Количество: ${usersData.length}`)
+    
+    // 3. Загружаем учетные записи с паролями
+    console.log(`📡 Запрашиваем учетные записи мероприятия ${eventId}...`)
+    const accountsData = await EventsService.getEventAccounts(eventId, apiFilters)
+    console.log(`✅ Учетные записи мероприятия ${eventId} получены:`, accountsData)
+    console.log(`   Количество: ${accountsData.length}`)
+    
+    // 4. 🔴 ВАЖНО: Объединяем данные
+    console.log('🤝 Начинаем объединение данных...')
+    
+    const mergedUsers = usersData.map(user => {
+      // Ищем соответствующую учетную запись
+      const account = accountsData.find(acc => {
+        const matches = acc.user_id === user.id || 
+                       (acc.user && acc.user.id === user.id)
+        
+        if (matches) {
+          console.log(`   ✅ Найдена учетная запись для ${user.last_name} ${user.first_name}`)
+        }
+        
+        return matches
+      })
+      
+      // Создаем объединенного пользователя
+      const mergedUser = {
+        ...user,
+        login: account?.login || null,
+        password: account?.password || null, // 🔴 СЫРОЙ ПАРОЛЬ ИЗ password_plain
+        plain_password: account?.password_plain || null,
+        seat_number: account?.seat_number || null,
+        role_in_event: account?.role || user.role_in_event,
+        account_data: account
+      }
+      
+      console.log(`   📋 ${user.last_name}:`, {
+        login: mergedUser.login,
+        hasPassword: !!mergedUser.password,
+        passwordLength: mergedUser.password?.length || 0
+      })
+      
+      return mergedUser
+    })
+    
+    // 5. Сохраняем данные
+    users.value = mergedUsers
+    eventAccounts.value = accountsData
+    
+    console.log('✅ Все данные загружены и объединены')
+    console.log(`   Итог: ${users.value.length} пользователей с учетными записями`)
+    
+    // 6. Проверяем первый пользователя для отладки
+    if (users.value.length > 0) {
+      const firstUser = users.value[0]
+      console.log('🔍 Первый пользователь в итоговом списке:', {
+        name: `${firstUser.last_name} ${firstUser.first_name}`,
+        login: firstUser.login,
+        password: firstUser.password,
+        passwordType: typeof firstUser.password
+      })
     }
     
   } catch (error) {
@@ -795,8 +1170,13 @@ const getLoginForUser = (user) => {
 }
 
 // Поиск пароля для пользователя
-const getPasswordForUser = (user) => {
-  return user.login ? '••••••••' : '—'
+// const getPasswordForUser = (user) => {
+//   return user.login ? '••••••••' : '—'
+// }
+
+const isParticipant = (user) => {
+  const roleName = user.role_in_event?.name?.toLowerCase() || ''
+  return roleName.includes('участник') || roleName === 'участник'
 }
 
 // Методы для сортировки
@@ -876,20 +1256,105 @@ const deleteModule = (module) => {
 }
 
 const addUser = () => {
-  console.log('Добавить пользователя')
-  alert('Функция добавления пользователя в разработке')
+  console.log('🟢 addUser вызван, showAddUserModal до:', showAddUserModal.value)
+  showAddUserModal.value = true
+  console.log('🟢 showAddUserModal после:', showAddUserModal.value)
+}
+
+
+// Обработчик добавления пользователя
+const handleUserAdded = async (userData) => {
+  console.log('✅ Пользователь добавлен:', userData)
+  
+  // Перезагружаем данные
+  await loadUsers()
+  
+  // Показываем логин/пароль
+  if (userData.credentials) {
+    alert(`✅ Участник добавлен!\n\n📝 Логин: ${userData.credentials.login}\n🔐 Пароль:
+         ${userData.credentials.password}\n\n💡 Сохраните эти данные для выдачи.`)
+  }
 }
 
 const editUser = (user) => {
-  console.log('Редактировать пользователя:', user)
-  alert('Функция редактирования пользователя в разработке')
+  console.log('✏️ Редактировать пользователя:', user)
+  selectedUser.value = user
+  showEditUserModal.value = true
 }
 
-const deleteUser = (user) => {
-  console.log('Удалить пользователя:', user)
-  if (confirm(`Удалить пользователя ${user.last_name} ${user.first_name}?`)) {
-    alert('Функция удаления пользователя в разработке')
+const deleteUser = async (user) => {
+  console.log('🗑️ Удалить пользователя:', user)
+  
+  const userName = `${user.last_name} ${user.first_name}`
+  const roleName = user.role_in_event?.name?.toLowerCase() || 'пользователя'
+  
+  if (!confirm(`Вы уверены, что хотите удалить ${roleName} "${userName}" из мероприятия?\n\nЭто действие нельзя отменить.`)) {
+    return
   }
+  
+  try {
+    // 1. Находим account_id
+    let accountId = user.account_data?.id
+    
+    if (!accountId) {
+      console.error('❌ Не найден account_id для удаления')
+      console.log('Пользователь:', user)
+      console.log('account_data:', user.account_data)
+      
+      // Попробуем найти вручную
+      const foundAccount = eventAccounts.value.find(acc => 
+        acc.user_id === user.id || (acc.user && acc.user.id === user.id)
+      )
+      
+      if (foundAccount) {
+        accountId = foundAccount.id
+        console.log('✅ Найден account_id вручную:', accountId)
+      } else {
+        throw new Error('Не найдена учетная запись пользователя')
+      }
+    }
+    
+    console.log(`🗑️ Удаляем учетную запись ${accountId}...`)
+    
+    // 2. Вызываем API
+    await EventsService.removeUserFromEvent(accountId)
+    
+    // 3. Показываем успех
+    alert(`✅ ${roleName.charAt(0).toUpperCase() + roleName.slice(1)} "${userName}" успешно удален из мероприятия`)
+    
+    // 4. Перезагружаем данные
+    await loadUsers()
+    
+  } catch (error) {
+    console.error('❌ Ошибка удаления:', error)
+    
+    let message = 'Не удалось удалить пользователя'
+    
+    if (error.message.includes('не найден') || error.response?.status === 404) {
+      message = 'Учетная запись не найдена'
+    } else if (error.response?.status === 403) {
+      message = 'У вас нет прав на удаление'
+    } else if (error.response?.status === 409) {
+      message = 'Нельзя удалить пользователя, у которого есть активные модули'
+    }
+    
+    alert(`❌ ${message}\n\n${error.message}`)
+  }
+}
+
+const handleUserSaved = (updatedUser) => {
+  console.log('✅ Пользователь обновлен:', updatedUser)
+  
+  // Обновляем пользователя в списке
+  const index = users.value.findIndex(u => u.id === updatedUser.id)
+  if (index !== -1) {
+    users.value[index] = {
+      ...users.value[index],
+      ...updatedUser
+    }
+  }
+  
+  alert('✅ Изменения сохранены!')
 }
 
 // Загрузка всех данных
@@ -935,6 +1400,67 @@ onMounted(async () => {
 
 .back-button:hover {
   text-decoration: underline;
+}
+
+.seat-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 1rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-width: 40px;
+  text-align: center;
+}
+
+.no-seat {
+  color: #dc2626;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.not-applicable {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Улучшенная кнопка генерации */
+.generate-seats-btn {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.generate-seats-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.generate-seats-btn:disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.generate-seats-btn .badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 0.25rem 0.5rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  margin-left: 0.25rem;
 }
 
 .event-name {
@@ -993,6 +1519,98 @@ onMounted(async () => {
   gap: 0.75rem;
 }
 
+/* Стили для секции управления паролями */
+.password-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.toggle-passwords-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #f3f4f6;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 0.95rem;
+}
+
+.toggle-passwords-btn:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.toggle-passwords-btn.active {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e40af;
+  font-weight: 600;
+}
+
+.toggle-passwords-btn.active:hover {
+  background: #bfdbfe;
+  border-color: #2563eb;
+}
+
+.password-hint {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-left: 0.5rem;
+  font-style: italic;
+}
+
+.password-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.password-warning {
+  color: #dc2626;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  background: #fef2f2;
+  border-radius: 4px;
+  border: 1px solid #fecaca;
+}
+
+.password-timer {
+  color: #059669;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  background: #d1fae5;
+  border-radius: 4px;
+  border: 1px solid #a7f3d0;
+}
+
+/* Обновите стили для ячеек с паролями */
+.password-cell.password-visible {
+  background-color: #fef3c7 !important;
+  position: relative;
+}
+
+.password-cell.password-visible::before {
+  content: '⚠️';
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
 .action-btn {
   padding: 0.5rem 1rem;
   border: none;
@@ -1047,6 +1665,45 @@ onMounted(async () => {
   margin: 0;
 }
 
+/* Стили для паролей */
+.password-cell {
+  position: relative;
+  min-width: 120px;
+}
+
+.password-hidden .password-value {
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+}
+
+.password-visible .password-value {
+  background: #fef3c7;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  color: #92400e;
+  font-weight: 500;
+  font-family: 'Courier New', monospace;
+  display: inline-block;
+  border: 1px solid #fbbf24;
+}
+
+.show-one-btn {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.show-one-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
 .users-header-controls {
   display: flex;
   gap: 1rem;
@@ -1078,6 +1735,19 @@ onMounted(async () => {
   outline: none;
   border-color: #2E80ED;
   box-shadow: 0 0 0 3px rgba(46, 128, 237, 0.1);
+}
+
+/* Стиль для выделенной ячейки при сортировке */
+.users-table td.sorted-cell {
+  background-color: #f0f9ff;
+  font-weight: 600;
+}
+
+.users-table td.sorted-cell .seat-badge {
+  background: #3b82f6;
+  color: white;
+  transform: scale(1.05);
+  transition: all 0.2s;
 }
 
 /* Кнопки */

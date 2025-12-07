@@ -332,5 +332,191 @@ async getEventAccounts(eventId, filters = {}) {
         throw error
       }
     }
-  }
+  },
+
+  // 1. Получить все роли (для выпадающего списка)
+  getAllRoles: async () => {
+    console.log('='.repeat(40))
+    console.log('🔄 Запрашиваем роли с сервера...')
+    
+    try {
+        const response = await apiClient.get('/roles')
+        console.log('✅ Роли получены:', response.data)
+        return response.data
+        
+    } catch (error) {
+        console.error('❌ Ошибка загрузки ролей:', error)
+        
+        if (error.response) {
+        console.error('Статус:', error.response.status)
+        console.error('Данные:', error.response.data)
+        }
+        
+        // Fallback
+        return [
+        { id: 1, name: 'Администратор' },
+        { id: 2, name: 'Эксперт' },
+        { id: 3, name: 'Участник' },
+        { id: 4, name: 'Главный эксперт' },
+        { id: 5, name: 'Технический эксперт' },
+        { id: 6, name: 'Наблюдатель' }
+        ]
+    }
+  },
+  
+  // 2. Поиск пользователей (для добавления в мероприятие)
+  searchAvailableUsers: async (eventId, searchQuery = '') => {
+    try {
+      const params = {
+        not_in_event: eventId
+      }
+      
+      if (searchQuery) {
+        params.search = searchQuery
+      }
+      
+      const response = await apiClient.get('/users', { params })
+      return response.data
+    } catch (error) {
+      console.error('❌ Ошибка поиска пользователей:', error)
+      return []
+    }
+  },
+  // 3. Добавить пользователя в мероприятие (уже есть, но проверьте)
+  addUserToEvent: async (eventId, userId, seatNumber = null, roleId = 1) => {
+    try {
+      const response = await apiClient.post('/event-accounts', {
+        user_id: userId,
+        event_id: eventId,
+        role_id: roleId
+      })
+      return response.data
+    } catch (error) {
+      console.error('❌ Ошибка добавления пользователя:', error)
+      throw error
+    }
+  },
+  
+  // 4. Обновить роль/место пользователя в мероприятии
+  updateEventAccount: async (accountId, data) => {
+    try {
+      const response = await apiClient.put(`/event-accounts/${accountId}`, data)
+      return response.data
+    } catch (error) {
+      console.error('❌ Ошибка обновления учетной записи:', error)
+      throw error
+    }
+  },
+  
+  // 5. Удалить пользователя из мероприятия (уже есть, но проверьте)
+  removeUserFromEvent: async (accountId) => {
+    try {
+      const response = await apiClient.delete(`/event-accounts/${accountId}`)
+      return response.data
+    } catch (error) {
+      console.error('❌ Ошибка удаления учетной записи:', error)
+      throw error
+    }
+  },
+
+    // Получить ID учетной записи по ID пользователя и мероприятия
+    async getAccountId(userId, eventId) {
+        console.log('='.repeat(40))
+        console.log(`🔍 Ищем accountId для user ${userId}, event ${eventId}`)
+        
+        try {
+            const accounts = await this.getEventAccounts(eventId)
+            const account = accounts.find(acc => 
+            acc.user_id === parseInt(userId) || 
+            (acc.user && acc.user.id === parseInt(userId))
+            )
+            
+            if (!account) {
+            throw new Error(`Учетная запись не найдена для user ${userId}`)
+            }
+            
+            console.log(`✅ Найден accountId: ${account.id}`)
+            return account.id
+            
+        } catch (error) {
+            console.error(`❌ Ошибка поиска accountId:`, error)
+            throw error
+        }
+    },
+    // Обновление места участников (упрощенная версия)
+    async updateUserSeat(eventId, userId, seatNumber) {
+        console.log('='.repeat(40))
+        console.log(`🎲 Обновляем место пользователя:`, { eventId, userId, seatNumber })
+        
+        try {
+            // Получаем accountId
+            const accountId = await this.getAccountId(userId, eventId)
+            
+            // Используем основной метод обновления
+            return await this.updateEventAccount(accountId, {
+            seat_number: seatNumber
+            })
+            
+        } catch (error) {
+            console.error(`❌ Ошибка обновления места:`, error)
+            throw error
+        }
+    },
+
+    // Сгенерировать новый пароль для пользователя
+    async generateNewPassword(accountId) {
+        console.log('='.repeat(40))
+        console.log(`🔑 Генерируем новый пароль для account ${accountId}`)
+        
+        // Генерация случайного пароля
+        const generatePassword = () => {
+            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
+            let password = ''
+            
+            password += Math.floor(Math.random() * 10) // цифра
+            password += String.fromCharCode(65 + Math.floor(Math.random() * 26)) // заглавная
+            password += String.fromCharCode(97 + Math.floor(Math.random() * 26)) // строчная
+            
+            for (let i = 0; i < 8; i++) {
+            password += chars[Math.floor(Math.random() * chars.length)]
+            }
+            
+            return password.split('').sort(() => Math.random() - 0.5).join('')
+        }
+        
+        const newPassword = generatePassword()
+        
+        try {
+            const response = await this.updateEventAccount(accountId, {
+            password_plain: newPassword
+            // password (хэш) будет обновлен автоматически в контроллере
+            })
+            
+            console.log(`✅ Новый пароль сгенерирован для account ${accountId}`)
+            
+            return {
+            ...response,
+            new_password: newPassword // возвращаем и сырой пароль для отображения
+            }
+            
+        } catch (error) {
+            console.error(`❌ Ошибка генерации пароля:`, error)
+            throw error
+        }
+    },
+    // Получить полную информацию об учетной записи
+        async getEventAccountDetails(accountId) {
+        console.log('='.repeat(40))
+        console.log(`📋 Запрашиваем детали учетной записи ${accountId}`)
+        
+        try {
+            const response = await apiClient.get(`/event-accounts/${accountId}`)
+            console.log(`✅ Детали учетной записи получены:`, response.data)
+            return response.data
+            
+        } catch (error) {
+            console.error(`❌ Ошибка получения деталей учетной записи:`, error)
+            throw error
+        }
+    },
 }
