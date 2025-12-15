@@ -95,33 +95,56 @@ export const EventsService = {
     }
   },
 
-  async getModuleTypes() {
-    console.log('='.repeat(40))
-    console.log('🔄 Запрашиваем типы модулей...')
+  async getModuleStatuses() {
+  console.log('='.repeat(40))
+  console.log('🔄 Запрашиваем статусы для модулей...')
+  
+  try {
+    // Используем endpoint для статусов по контексту "module"
+    const response = await apiClient.get('/statuses/context/module')
+    console.log('✅ Статусы модулей получены:', response.data)
+    return response.data
     
-    try {
-        // Проверяем, есть ли endpoint для типов модулей
-        const response = await apiClient.get('/module-types')
-        console.log('✅ Типы модулей получены:', response.data)
-        return response.data
+  } catch (error) {
+    console.warn('⚠️ Не удалось получить статусы модулей, используем fallback:', error)
+    
+    // Fallback - только нужные статусы для модулей
+    return [
+      { id: 1, name: 'Запланирован' },
+      { id: 2, name: 'Активен' },
+      { id: 3, name: 'Завершён' },
+      { id: 4, name: 'Отменён' }
+    ]
+  }
+},
+
+//   async getModuleTypes() {
+//     console.log('='.repeat(40))
+//     console.log('🔄 Запрашиваем типы модулей...')
+    
+//     try {
+//         // Проверяем, есть ли endpoint для типов модулей
+//         const response = await apiClient.get('/module-types')
+//         console.log('✅ Типы модулей получены:', response.data)
+//         return response.data
         
-    } catch (error) {
-        console.warn('⚠️ Не удалось получить типы модулей, используем локальные:', error)
+//     } catch (error) {
+//         console.warn('⚠️ Не удалось получить типы модулей, используем локальные:', error)
         
-        // Локальная мапа типов модулей (можно настроить под вашу систему)
-        const localTypes = [
-        { id: 1, name: 'Тестовый' },
-        { id: 2, name: 'Рабочий' },
-        { id: 3, name: 'Резервный' },
-        { id: 4, name: 'PostgreSQL' },
-        { id: 5, name: 'MySQL' },
-        { id: 6, name: 'GitLab' },
-        // Добавьте другие типы по необходимости
-        ]
+//         // Локальная мапа типов модулей (можно настроить под вашу систему)
+//         const localTypes = [
+//         { id: 1, name: 'Тестовый' },
+//         { id: 2, name: 'Рабочий' },
+//         { id: 3, name: 'Резервный' },
+//         { id: 4, name: 'PostgreSQL' },
+//         { id: 5, name: 'MySQL' },
+//         { id: 6, name: 'GitLab' },
+//         // Добавьте другие типы по необходимости
+//         ]
         
-        return localTypes
-        }
-    },
+//         return localTypes
+//         }
+//     },
 
   // Получить одно мероприятие по ID
   async getEventById(id) {
@@ -519,4 +542,228 @@ async getEventAccounts(eventId, filters = {}) {
             throw error
         }
     },
+
+    // Создать новый модуль
+    async createModule(eventId, moduleData) {
+        console.log('='.repeat(40))
+        console.log(`🔄 Создаем модуль для мероприятия ${eventId}...`)
+        console.log('📋 Исходные данные модуля:', moduleData)
+        
+        // Проверка обязательных полей на клиенте
+        const validationErrors = []
+        
+        if (!moduleData.name || moduleData.name.trim().length < 2) {
+            validationErrors.push('Название модуля должно содержать минимум 2 символа')
+        }
+        
+        // if (!moduleData.type_id) {
+        //     validationErrors.push('Тип модуля обязателен для выбора')
+        // }
+        
+        if (!moduleData.status_id) {
+            validationErrors.push('Статус модуля обязателен для выбора')
+        }
+        
+        if (validationErrors.length > 0) {
+            console.error('❌ Ошибки валидации на клиенте:', validationErrors)
+            throw new Error(validationErrors.join(', '))
+        }
+        
+        try {
+            // Формируем данные для отправки
+            const data = {
+            name: moduleData.name.trim(),
+            event_id: eventId,
+            type_id: moduleData.type_id,
+            status_id: moduleData.status_id
+            }
+            
+            // Добавляем описание если оно есть
+            if (moduleData.description) {
+            data.description = moduleData.description.trim()
+            }
+            
+            console.log('📤 Отправляемые данные на сервер:')
+            console.log('   Endpoint: POST /modules')
+            console.log('   Данные:', JSON.stringify(data, null, 2))
+            
+            const response = await apiClient.post('/modules', data)
+            
+            console.log('✅ Модуль создан успешно!')
+            console.log('📋 Ответ сервера:', response.data)
+            
+            // Проверяем структуру ответа
+            if (response.data && response.data.id) {
+            console.log(`🎉 Модуль создан! ID: ${response.data.id}, Название: "${response.data.name}"`)
+            
+            if (response.data.event) {
+                console.log(`   🏷️ Мероприятие: ${response.data.event.name}`)
+            }
+            if (response.data.type) {
+                console.log(`   📊 Тип: ${response.data.type.name}`)
+            }
+            if (response.data.status) {
+                console.log(`   📈 Статус: ${response.data.status.name}`)
+            }
+            }
+            
+            return response.data
+            
+        } catch (error) {
+            console.error(`❌ Ошибка создания модуля для мероприятия ${eventId}:`, error)
+            
+            // Обработка ошибок
+            if (error.response) {
+            console.error('📡 Ответ сервера:')
+            console.error('   Статус:', error.response.status)
+            console.error('   Данные ошибки:', error.response.data)
+            
+            if (error.response.status === 422) {
+                const validationErrors = error.response.data.errors
+                if (validationErrors) {
+                const errorMessages = Object.values(validationErrors).flat()
+                throw new Error(`Ошибка: ${errorMessages.join(', ')}`)
+                }
+            }
+            }
+            
+            throw error
+        }
+    },
+
+    // Обновить модуль
+async updateModule(moduleId, moduleData) {
+  console.log('='.repeat(40))
+  console.log(`🔄 Обновляем модуль ID: ${moduleId}...`)
+  console.log('📋 Данные для обновления:', moduleData)
+  
+  // Подготовка данных (обрезка пробелов и т.д.)
+  const data = {
+    ...moduleData,
+    name: moduleData.name?.trim() || moduleData.name
+  }
+  
+  try {
+    console.log(`📡 PUT запрос на /modules/${moduleId}`)
+    console.log('   Данные:', JSON.stringify(data, null, 2))
+    
+    const response = await apiClient.put(`/modules/${moduleId}`, data)
+    
+    console.log(`✅ Модуль ${moduleId} обновлен успешно!`)
+    console.log('📋 Ответ сервера:', response.data)
+    
+    return response.data
+    
+  } catch (error) {
+    console.error(`❌ Ошибка обновления модуля ${moduleId}:`, error)
+    
+    if (error.response) {
+      console.error('📡 Ответ сервера:')
+      console.error('   Статус:', error.response.status)
+      console.error('   URL:', error.config?.url)
+      console.error('   Данные ошибки:', error.response.data)
+      
+      if (error.response.status === 404) {
+        throw new Error('Модуль не найден')
+      }
+      if (error.response.status === 422) {
+        const errors = error.response.data.errors
+        if (errors) {
+          const errorMessages = Object.values(errors).flat()
+          throw new Error(`Ошибка обновления: ${errorMessages.join(', ')}`)
+        }
+      }
+    }
+    
+    throw error
+  }
+},
+
+// Удалить модуль
+async deleteModule(moduleId) {
+  console.log('='.repeat(40))
+  console.log(`🗑️ Удаляем модуль ID: ${moduleId}...`)
+  
+  try {
+    console.log(`📡 DELETE запрос на /modules/${moduleId}`)
+    
+    const response = await apiClient.delete(`/modules/${moduleId}`)
+    
+    console.log(`✅ Модуль ${moduleId} удален успешно!`)
+    console.log('📋 Статус:', response.status)
+    
+    return response.data || { success: true, message: 'Модуль удален' }
+    
+  } catch (error) {
+    console.error(`❌ Ошибка удаления модуля ${moduleId}:`, error)
+    
+    if (error.response) {
+      console.error('📡 Ответ сервера:')
+      console.error('   Статус:', error.response.status)
+      console.error('   URL:', error.config?.url)
+      console.error('   Данные ошибки:', error.response.data)
+      
+      // Специфичные сообщения для разных статусов
+      switch (error.response.status) {
+        case 404:
+          throw new Error('Модуль не найден')
+        case 403:
+          throw new Error('Нет прав на удаление модуля')
+        case 409:
+          throw new Error('Нельзя удалить модуль с активными данными')
+        default:
+          throw new Error(`Не удалось удалить модуль (статус: ${error.response.status})`)
+      }
+    } else if (error.request) {
+      throw new Error('Нет ответа от сервера')
+    } else {
+      throw error
+    }
+  }
+},
+
+// Получить детальную информацию о модуле
+async getModuleById(moduleId) {
+  console.log('='.repeat(40))
+  console.log(`🔍 Загружаем модуль ID: ${moduleId}`)
+  
+  try {
+    console.log(`📡 GET запрос на /modules/${moduleId}`)
+    
+    const response = await apiClient.get(`/modules/${moduleId}`)
+    
+    console.log(`✅ Модуль ${moduleId} получен успешно!`)
+    
+    // Проверяем структуру ответа
+    if (!response.data) {
+      console.warn('⚠️ Ответ сервера пуст')
+      throw new Error('Модуль не найден')
+    }
+    
+    console.log('📋 Данные модуля:', {
+      id: response.data.id,
+      name: response.data.name,
+      event: response.data.event?.name,
+      type: response.data.type?.name,
+      status: response.data.status?.name
+    })
+    
+    return response.data
+    
+  } catch (error) {
+    console.error(`❌ Ошибка получения модуля ${moduleId}:`, error)
+    
+    if (error.response) {
+      console.error('📡 Ответ сервера:')
+      console.error('   Статус:', error.response.status)
+      console.error('   URL:', error.config?.url)
+      
+      if (error.response.status === 404) {
+        throw new Error('Модуль не найден')
+      }
+    }
+    
+    throw error
+  }
+}
 }

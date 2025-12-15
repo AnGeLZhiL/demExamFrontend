@@ -48,29 +48,22 @@
         </section>
 
         <section v-else class="modules-grid">
-          <article v-for="module in modules" :key="module.id" class="module-card">
+            <article 
+                v-for="module in modules" 
+                :key="module.id" 
+                class="module-card"
+                @click="goToModule(module.id)"
+                :title="`Кликните для перехода в модуль ${module.name}`"
+            >
             <header class="module-header">
               <h3>{{ module.name }}</h3>
-              <span class="module-status" :class="getModuleStatusClass(module.status_id)">
-                {{ module.status?.name || 'Неизвестно' }}
-              </span>
+              <span class="module-status" :class="getModuleStatusClass(module)">
+  {{ module.status?.name || 'Неизвестно' }}
+</span>
             </header>
-            
-            <section class="module-info">
-                <div class="module-type">
-                    <span class="type-label">Тип:</span>
-                    <span class="type-value">{{ module.type?.name || 'Не указан' }}</span>
-                </div>
-            </section>
-
-            <footer class="module-actions">
-              <button class="action-btn edit-btn" @click="editModule(module)">
-                Редактировать
-              </button>
-              <button class="action-btn delete-btn" @click="deleteModule(module)">
-                Удалить
-              </button>
-            </footer>
+            <div class="module-hover-indicator">
+                <span class="hover-text">Перейти в модуль →</span>
+            </div>
           </article>
         </section>
       </section>
@@ -428,6 +421,13 @@
         @close="showEditUserModal = false"
         @saved="handleUserSaved"
     />
+    <CreateModuleModal
+        :show="showCreateModuleModal"
+        :event-id="eventId"
+        :module="selectedModule"
+        @close="handleModuleModalClose"
+        @created="handleModuleCreated"
+    />
   </main>
 </template>
 
@@ -437,6 +437,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { EventsService } from '@/services/eventsService'
 import SimpleAddUserModal from '@/components/SimpleAddUserModal.vue'
 import EditUserModal from '@/components/EditUserModal.vue'
+import CreateModuleModal from '@/components/CreateModuleModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -446,6 +447,10 @@ const eventId = route.params.id
 const event = ref(null)
 const loadingEvent = ref(true)
 const eventError = ref('')
+
+//данные для модуля
+const showCreateModuleModal = ref(false)
+const selectedModule = ref(null)
 
 // 🔴 ПЕРЕМЕННЫЕ ДЛЯ РЕДАКТИРОВАНИЯ
 const showEditModal = ref(false)
@@ -485,16 +490,10 @@ const handleKeydown = (e) => {
 
 const generateSeats = async () => {
   // Получаем только участников
-  const participants = users.value
+  let participants = users.value
     .filter(user => {
       const roleName = user.role_in_event?.name?.toLowerCase() || ''
       return roleName.includes('участник') || roleName === 'участник'
-    })
-    .sort((a, b) => {
-      // Сортируем по ФИО для последовательной нумерации
-      const nameA = `${a.last_name} ${a.first_name}`.toLowerCase()
-      const nameB = `${b.last_name} ${b.first_name}`.toLowerCase()
-      return nameA.localeCompare(nameB)
     })
   
   if (participants.length === 0) {
@@ -502,10 +501,27 @@ const generateSeats = async () => {
     return
   }
   
+  // Создаем массив мест
+  const seatNumbers = Array.from({ length: participants.length }, (_, i) => (i + 1).toString())
+  
+  // Перемешиваем участников случайным образом
+  const shuffleArray = (array) => {
+    const shuffled = [...array]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled
+  }
+  
+  // Перемешиваем и участников, и места
+  const shuffledParticipants = shuffleArray(participants)
+  const shuffledSeats = shuffleArray(seatNumbers)
+  
   // Подтверждение
-  const message = `Назначить места ${participants.length} участникам?\n\n` +
-                 `Участники получат номера мест от 1 до ${participants.length}\n` +
-                 `в алфавитном порядке по ФИО.\n` +
+  const message = `Назначить случайные места ${participants.length} участникам?\n\n` +
+                 `Участники получат места от 1 до ${participants.length}\n` +
+                 `в ПОЛНОСТЬЮ случайном порядке.\n` +
                  `Существующие места будут перезаписаны.`
   
   if (!confirm(message)) {
@@ -513,22 +529,25 @@ const generateSeats = async () => {
   }
   
   try {
-    console.log(`🎲 Генерируем места для ${participants.length} участников...`)
+    console.log('🎲 Полностью случайное распределение:')
+    console.log('👥 Участники (перемешанные):', shuffledParticipants.map(p => p.last_name))
+    console.log('🔢 Места (перемешанные):', shuffledSeats)
     
-    // Создаем обновления с порядковыми номерами
-    const updates = participants.map((user, index) => ({
+    // Создаем обновления - случайный участник получает случайное место
+    const updates = shuffledParticipants.map((user, index) => ({
       userId: user.id,
       userName: `${user.last_name} ${user.first_name}`,
-      seatNumber: (index + 1).toString(), // Места 1, 2, 3...
-      currentSeat: user.seat_number || 'не назначено'
+      currentSeat: user.seat_number || 'не назначено',
+      newSeat: shuffledSeats[index]
     }))
     
     // Показываем превью
-    const preview = updates.map(u => 
-      `${u.seatNumber}. ${u.userName} (было: ${u.currentSeat})`
-    ).join('\n')
+    const preview = updates
+      .sort((a, b) => parseInt(a.newSeat) - parseInt(b.newSeat)) // сортируем по местам для удобства
+      .map(u => `${u.newSeat}. ${u.userName} (было: ${u.currentSeat})`)
+      .join('\n')
     
-    if (!confirm(`Будут назначены места:\n\n${preview}\n\nПродолжить?`)) {
+    if (!confirm(`Случайное распределение мест:\n\n${preview}\n\nПродолжить?`)) {
       return
     }
     
@@ -538,8 +557,8 @@ const generateSeats = async () => {
     
     for (const update of updates) {
       try {
-        await EventsService.updateUserSeat(eventId, update.userId, update.seatNumber)
-        console.log(`✅ ${update.seatNumber}. ${update.userName}`)
+        await EventsService.updateUserSeat(eventId, update.userId, update.newSeat)
+        console.log(`✅ ${update.newSeat}. ${update.userName}`)
         successCount++
       } catch (error) {
         console.error(`❌ Ошибка для ${update.userName}:`, error)
@@ -549,7 +568,7 @@ const generateSeats = async () => {
     
     // Результат
     if (errorCount === 0) {
-      alert(`✅ Успешно назначены места для ${successCount} участников!`)
+      alert(`✅ Успешно! Случайные места назначены ${successCount} участникам.`)
     } else {
       alert(`⚠️ Назначены места для ${successCount} участников, ошибок: ${errorCount}`)
     }
@@ -618,20 +637,6 @@ const isEditFormValid = computed(() => {
          editEventData.value.status_id !== ''
 })
 
-const formatDateForAPI = (dateString) => {
-  if (!dateString) return ''
-  
-  // Преобразуем из "YYYY-MM-DDTHH:MM" в "YYYY-MM-DD HH:MM:SS"
-  const date = new Date(dateString)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  
-  return `${year}-${month}-${day} ${hours}:${minutes}:00`
-}
-
 const validateEditForm = () => {
   const errors = []
   
@@ -658,6 +663,24 @@ const validateEditForm = () => {
   return errors
 }
 
+const formatDateForAPI = (dateString) => {
+  if (!dateString) return ''
+  
+  try {
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return ''
+    
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:00`
+  } catch {
+    return ''
+  }
+}
 
 // 🔴 ОБНОВЛЕНИЕ МЕРОПРИЯТИЯ
 const updateEvent = async () => {
@@ -992,7 +1015,7 @@ const sortBySeatNumber = (a, b, direction) => {
   
   // Если оба участники
   if (aIsParticipant && bIsParticipant) {
-    const aSeat = parseInt(a.seat_number) || 99999
+    const aSeat = a.seat_number ? parseInt(a.seat_number) : 99999
     const bSeat = parseInt(b.seat_number) || 99999
     
     // Числовая сортировка
@@ -1031,6 +1054,7 @@ const loadEvent = async () => {
 }
 
 // Загрузка модулей мероприятия
+
 const loadModules = async () => {
   try {
     loadingModules.value = true
@@ -1038,7 +1062,7 @@ const loadModules = async () => {
     console.log('✅ Модули загружены:', modules.value)
   } catch (error) {
     console.error('❌ Ошибка загрузки модулей:', error)
-    modulesError.value = error.message || 'Не удалось загрузить модули'
+    modulesError.value = error.message
   } finally {
     loadingModules.value = false
   }
@@ -1224,13 +1248,22 @@ const getStatusClass = (statusId) => {
   return classes[statusId] || 'status-unknown'
 }
 
-const getModuleStatusClass = (statusId) => {
-  const classes = {
-    1: 'module-status-planned',
-    2: 'module-status-active',
-    3: 'module-status-completed'
+const getModuleStatusClass = (module) => {
+  if (!module.status) return 'module-status-unknown'
+  
+  const statusName = module.status.name.toLowerCase()
+  
+  if (statusName.includes('планир') || statusName === 'запланирован') {
+    return 'module-status-planned'
+  } else if (statusName.includes('актив') || statusName === 'активен') {
+    return 'module-status-active'
+  } else if (statusName.includes('заверш') || statusName === 'завершён') {
+    return 'module-status-completed'
+  } else if (statusName.includes('отмен') || statusName === 'отменён') {
+    return 'module-status-cancelled'
   }
-  return classes[statusId] || 'module-status-unknown'
+  
+  return 'module-status-unknown'
 }
 
 // Обработчики действий
@@ -1238,21 +1271,34 @@ const goBack = () => {
   router.push('/events')
 }
 
+const goToModule = (moduleId) => {
+  console.log(`➡️ Переходим в модуль ID: ${moduleId}`)
+  router.push(`/modules/${moduleId}`)
+}
+
 const addModule = () => {
-  console.log('Добавить модуль')
-  alert('Функция добавления модуля в разработке')
+  console.log('➕ Добавить модуль')
+  selectedModule.value = null
+  showCreateModuleModal.value = true
+  
+  // Добавьте для отладки:
+  console.log('showCreateModuleModal установлен в:', showCreateModuleModal.value)
 }
 
-const editModule = (module) => {
-  console.log('Редактировать модуль:', module)
-  alert('Функция редактирования модуля в разработке')
+// Обработчики событий от модального окна модуля
+const handleModuleModalClose = () => {
+  console.log('📌 Модальное окно модуля закрыто')
+  showCreateModuleModal.value = false
+  selectedModule.value = null
 }
 
-const deleteModule = (module) => {
-  console.log('Удалить модуль:', module)
-  if (confirm(`Удалить модуль "${module.name}"?`)) {
-    alert('Функция удаления модуля в разработке')
-  }
+const handleModuleCreated = (newModule) => {
+  console.log('✅ Модуль создан:', newModule)
+  
+  // Перезагружаем модули
+  loadModules()
+  
+  alert(`✅ Модуль "${newModule.name}" успешно создан`)
 }
 
 const addUser = () => {
@@ -1367,10 +1413,23 @@ const loadAllData = async () => {
 }
 
 onMounted(async () => {
-  console.log(`🚀 Загружаем детальную страницу мероприятия ID: ${eventId}`)
-  await loadStatuses() // загружаем статусы
-  await loadAllData()
+  console.log('🚀 Загружаем страницу мероприятия')
+  await loadModules()
+  
+  // Отладка статусов модулей
+  if (modules.value.length > 0) {
+    console.log('🔍 Анализ статусов модулей:')
+    modules.value.forEach((module, index) => {
+      console.log(`Модуль ${index + 1}:`, {
+        name: module.name,
+        status_id: module.status_id,
+        status: module.status,
+        statusName: module.status?.name
+      })
+    })
+  }
 })
+
 </script>
 
 <style scoped>
@@ -1987,8 +2046,13 @@ onMounted(async () => {
 }
 
 .module-status-active {
-  background: #D1FAE5;
-  color: #065F46;
+  background: #D1FAE5;  /* светло-зеленый */
+  color: #065F46;       /* темно-зеленый */
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-block;
 }
 
 .module-status-planned {
@@ -1999,6 +2063,16 @@ onMounted(async () => {
 .module-status-completed {
   background: #F3F4F6;
   color: #374151;
+}
+
+.module-status-cancelled {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+
+.module-status-unknown {
+  background: #F3F4F6;
+  color: #6B7280;
 }
 
 .module-actions {
@@ -2021,6 +2095,52 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Стили для кликабельной карточки модуля */
+.module-card {
+  cursor: pointer;
+  position: relative;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+}
+
+.module-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+  border-color: #2E80ED;
+  background-color: #f8fafc;
+}
+
+.module-hover-indicator {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  text-align: right;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.module-card:hover .module-hover-indicator {
+  opacity: 1;
+}
+
+.hover-text {
+  font-size: 0.85rem;
+  color: #2E80ED;
+  font-weight: 500;
+}
+
+/* Можно также добавить стрелку при наведении */
+.module-header h3::after {
+  content: " →";
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  color: #2E80ED;
+}
+
+.module-card:hover .module-header h3::after {
+  opacity: 1;
 }
 
 .type-label {

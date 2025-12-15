@@ -4,13 +4,22 @@ import apiClient from './api'
 
 //объект с методами для авторизации
 export const AuthService = {
-  //метод для входав систему
-  login(credentials) {
-    return apiClient.post('/login', credentials)
+  //метод для входа в систему
+  async login(credentials) {
+    try {
+      const response = await apiClient.post('/login', credentials)    
+      return response
+    } catch (error) {
+      console.error('AuthService login error:', error)
+      throw error
+    }
   },
 
   //метод для выхода
   logout() {
+    // Очищаем localStorage
+    this.clearAuthData()
+    
     return apiClient.post('/logout')
   },
 
@@ -34,6 +43,31 @@ export const AuthService = {
   getUserData() {
     const user = localStorage.getItem('user')
     return user ? JSON.parse(user) : null
+  },
+
+  // ⭐⭐⭐ НОВЫЙ МЕТОД: ПРОВЕРКА ЯВЛЯЕТСЯ ЛИ АДМИНОМ ⭐⭐⭐
+  isAdmin() {
+    const user = this.getUserData()
+    return user?.system_role?.name === 'Администратор'
+  },
+
+  // ⭐⭐⭐ НОВЫЙ МЕТОД: ПРОВЕРКА СИСТЕМНОГО ПОЛЬЗОВАТЕЛЯ ⭐⭐⭐
+  isSystemUser() {
+    const user = this.getUserData()
+    return user?.is_system_account === true
+  },
+
+  // ⭐⭐⭐ НОВЫЙ МЕТОД: ПОЛУЧЕНИЕ ИМЕНИ ПОЛЬЗОВАТЕЛЯ ⭐⭐⭐
+  getUserName() {
+    const user = this.getUserData()
+    if (!user) return ''
+    return `${user.first_name} ${user.last_name}`
+  },
+
+  // ⭐⭐⭐ НОВЫЙ МЕТОД: ПОЛУЧЕНИЕ ID МЕРОПРИЯТИЯ (если есть) ⭐⭐⭐
+  getEventId() {
+    const user = this.getUserData()
+    return user?.event_id
   },
 
   //получение данных учетной записи

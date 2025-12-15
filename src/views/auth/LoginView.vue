@@ -108,10 +108,50 @@ const handleLogin = async () => {
 
     const data = response.data
     console.log('✅ Успешный вход:', data)
+    console.log('🔍 Проверяем system_role:', data.system_role)
+    console.log('🔍 Проверяем is_system_account:', data.is_system_account)
 
+    // Сохраняем токен
     localStorage.setItem('auth_token', data.token)
-    localStorage.setItem('user', JSON.stringify(data.user))
-    localStorage.setItem('event_account', JSON.stringify(data.event_account))
+    
+    // Сохраняем полные данные пользователя
+    const userData = {
+      // Базовые данные пользователя
+      id: data.user.id,
+      last_name: data.user.last_name,
+      first_name: data.user.first_name,
+      middle_name: data.user.middle_name,
+      group_id: data.user.group_id,
+      
+      // Системная роль пользователя
+      system_role: data.user.system_role,
+      
+      // Данные из корня ответа
+      is_system_account: data.is_system_account,
+      
+      // Для учеток мероприятий (могут быть null/undefined)
+      event_role: data.event_role,
+      event_id: data.event_id,
+      event_account: data.event_account,
+
+      token: data.token
+    }
+
+    //Удаляем пустые поля
+    Object.keys(userData).forEach(key => {
+      if (userData[key] === null || userData[key] === undefined) {
+        delete userData[key]
+      }
+    })
+
+    localStorage.setItem('user', JSON.stringify(userData))
+    console.log('💾 Сохранен user:', userData)
+    console.log('🔍 token в userData:', userData.token)
+
+    if (window.axios) {
+      window.axios.defaults.headers.common['Authorization'] = `Bearer ${data.token}`
+      console.log('🔄 Заголовок Authorization установлен')
+    }
 
     alert(`Добро пожаловать, ${data.user.first_name}!`)
     router.push('/events')

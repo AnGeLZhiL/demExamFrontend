@@ -35,6 +35,12 @@ const routes = [
         props: true
       }
     ]
+  },
+  {
+    path: '/modules/:id',
+    name: 'module-detail',
+    component: () => import('@/views/ModuleDetailPage.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
