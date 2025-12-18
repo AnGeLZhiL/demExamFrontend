@@ -371,9 +371,11 @@ const closeModal = () => {
 const loadStatuses = async () => {
   try {
     console.log('🏷️ Загружаем статусы мероприятий...')
-    const data = await EventsService.getStatuses()
+    // 🔴 ПЕРЕДАЕМ КОНТЕКСТ 'event' для фильтрации
+    const data = await EventsService.getStatuses('event')
     statuses.value = data
-    console.log('✅ Статусы загружены:', data)
+    console.log('✅ Статусы мероприятий загружены:', data)
+    
   } catch (error) {
     console.error('❌ Ошибка загрузки статусов:', error)
     // Fallback если API не работает

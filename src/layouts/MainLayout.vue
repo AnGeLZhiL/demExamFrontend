@@ -15,16 +15,16 @@
             </router-link>
           </li>
           <li>
-            <a href="#" class="nav-link disabled">
+            <router-link to="/users" class="nav-link" active-class="active">
               <span class="nav-icon">👥</span>
               <span>Пользователи</span>
-            </a>
+            </router-link>
           </li>
           <li>
-            <a href="#" class="nav-link disabled">
+            <router-link to="/logs" class="nav-link" active-class="active">
               <span class="nav-icon">📖</span>
               <span>Журнал</span>
-            </a>
+            </router-link>
           </li>
           <li>
             <a href="#" class="nav-link disabled">
@@ -36,10 +36,7 @@
       </nav>
       
       <footer class="sidebar-footer">
-        <div class="city-info">
-          <span class="city-icon">📍</span>
-          <span class="city-name">Екатеринбург</span>
-        </div>
+        
         
         <button @click="logout" class="logout-btn">
           <span class="logout-icon">🚪</span>

@@ -5,6 +5,9 @@ const LoginView = () => import('@/views/auth/LoginView.vue')
 const EventsView = () => import('@/views/EventsView.vue')
 const MainLayout = () => import('@/layouts/MainLayout.vue')
 const EventDetail = () => import('@/views/EventDetail.vue')
+const ModuleDetailPage = () => import('@/views/ModuleDetailPage.vue')
+const UsersView = () => import('@/views/UsersView.vue')
+const LogsView = () => import('@/views/LogsView.vue')
 
 
 const routes = [
@@ -37,10 +40,41 @@ const routes = [
     ]
   },
   {
-    path: '/modules/:id',
-    name: 'module-detail',
-    component: () => import('@/views/ModuleDetailPage.vue'),
-    meta: { requiresAuth: true }
+    path: '/modules',
+    component: MainLayout,  // Добавляем MainLayout и для модулей
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: ':id', // /modules/:id
+        name: 'module-detail',
+        component: ModuleDetailPage,
+        props: true
+      }
+    ]
+  },
+  {
+    path: '/users',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'Users',
+        component: UsersView
+      }
+    ]
+  },
+  {
+    path: '/logs',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'Logs',
+        component: LogsView
+      }
+    ]
   }
 ]
 

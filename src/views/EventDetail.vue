@@ -8,10 +8,10 @@
       <!-- 🔴 КНОПКИ ДЕЙСТВИЙ -->
         <div class="header-actions header-top">
           <button @click="editEvent" class="action-btn edit-event-btn">
-            ✏️ Редактировать
+            Редактировать
           </button>
           <button @click="deleteEvent" class="action-btn delete-event-btn">
-            🗑️ Удалить
+            Удалить
           </button>
         </div>
       <h1 class="event-name">{{ event?.name || 'Загрузка...' }}</h1>
@@ -85,7 +85,7 @@
                 @click="generateSeats"
                 :disabled="loadingUsers"
             >
-                🎲 Назначить места
+                Назначить места
                 <span class="participants-count">
                 ({{ participantsCount }} уч.)
                 </span>
@@ -215,15 +215,15 @@
             :class="{ 'active': showPasswords }"
             type="button"
             >
-            <span v-if="!showPasswords">👁️ Показать все пароли</span>
-            <span v-else>🙈 Скрыть все пароли</span>
+            <span v-if="!showPasswords">Показать все пароли</span>
+            <span v-else>Скрыть все пароли</span>
             <span class="password-hint" v-if="!showPasswords">
                 (будут скрыты через 30 секунд)
             </span>
             </button>
             
             <div class="password-info" v-if="showPasswords">
-            <span class="password-warning">⚠️ Все пароли видны</span>
+            <span class="password-warning">Все пароли видны</span>
             <span class="password-timer" v-if="passwordTimer > 0">
                 Автоматическое скрытие через: {{ passwordTimer }} сек.
             </span>
@@ -529,9 +529,9 @@ const generateSeats = async () => {
   }
   
   try {
-    console.log('🎲 Полностью случайное распределение:')
-    console.log('👥 Участники (перемешанные):', shuffledParticipants.map(p => p.last_name))
-    console.log('🔢 Места (перемешанные):', shuffledSeats)
+    console.log('Полностью случайное распределение:')
+    console.log('Участники (перемешанные):', shuffledParticipants.map(p => p.last_name))
+    console.log('Места (перемешанные):', shuffledSeats)
     
     // Создаем обновления - случайный участник получает случайное место
     const updates = shuffledParticipants.map((user, index) => ({
@@ -561,7 +561,7 @@ const generateSeats = async () => {
         console.log(`✅ ${update.newSeat}. ${update.userName}`)
         successCount++
       } catch (error) {
-        console.error(`❌ Ошибка для ${update.userName}:`, error)
+        console.error(`Ошибка для ${update.userName}:`, error)
         errorCount++
       }
     }
@@ -570,7 +570,7 @@ const generateSeats = async () => {
     if (errorCount === 0) {
       alert(`✅ Успешно! Случайные места назначены ${successCount} участникам.`)
     } else {
-      alert(`⚠️ Назначены места для ${successCount} участников, ошибок: ${errorCount}`)
+      alert(`Назначены места для ${successCount} участников, ошибок: ${errorCount}`)
     }
     
     // Перезагружаем данные
@@ -578,7 +578,7 @@ const generateSeats = async () => {
     
   } catch (error) {
     console.error('❌ Общая ошибка:', error)
-    alert('❌ Не удалось сгенерировать места')
+    alert('Не удалось сгенерировать места')
   }
 }
 
@@ -715,7 +715,7 @@ const updateEvent = async () => {
         closeEditModal()
         
         // Уведомление
-        alert('✅ Изменения сохранены!')
+        alert('Изменения сохранены!')
         
     } catch (error) {
         console.error('❌ Ошибка обновления мероприятия:', error)
@@ -767,7 +767,7 @@ let passwordTimerInterval = null
 // Переключить все пароли
 const togglePasswords = () => {
   if (!showPasswords.value) {
-    if (!confirm('⚠️  Внимание!\n\nПоказать пароли всех пользователей?\n\nПароли будут видны в течение 30 секунд.\n\nЭто действие может быть небезопасным.\n\nПродолжить?')) {
+    if (!confirm('Внимание!\n\nПоказать пароли всех пользователей?\n\nПароли будут видны в течение 30 секунд.\n\nЭто действие может быть небезопасным.\n\nПродолжить?')) {
       return
     }
     
@@ -782,7 +782,7 @@ const togglePasswords = () => {
         clearInterval(passwordTimerInterval)
         showPasswords.value = false
         visiblePasswords.value = {}
-        alert('⏰ Пароли автоматически скрыты для безопасности.')
+        alert('Пароли автоматически скрыты для безопасности.')
       }
     }, 1000)
     
@@ -808,7 +808,7 @@ const showUserPassword = (userId) => {
 
 // Получить пароль для отображения
 const getPasswordForUser = (user) => {
-  console.log('🔍 getPasswordForUser вызывается для:', {
+  console.log('getPasswordForUser вызывается для:', {
     userId: user.id,
     userName: `${user.last_name} ${user.first_name}`,
     login: user.login,
@@ -1043,11 +1043,21 @@ const sortTextValues = (a, b, direction) => {
 const loadEvent = async () => {
   try {
     loadingEvent.value = true
+    eventError.value = '' // сбрасываем ошибку
     event.value = await EventsService.getEventById(eventId)
     console.log('✅ Мероприятие загружено:', event.value)
   } catch (error) {
     console.error('❌ Ошибка загрузки мероприятия:', error)
     eventError.value = error.message || 'Не удалось загрузить мероприятие'
+    
+    // Показываем сообщение пользователю
+    if (error.response?.status === 404) {
+      eventError.value = 'Мероприятие не найдено'
+      // Редирект на страницу мероприятий через 3 секунды
+      setTimeout(() => {
+        router.push('/events')
+      }, 3000)
+    }
   } finally {
     loadingEvent.value = false
   }
@@ -1317,19 +1327,19 @@ const handleUserAdded = async (userData) => {
   
   // Показываем логин/пароль
   if (userData.credentials) {
-    alert(`✅ Участник добавлен!\n\n📝 Логин: ${userData.credentials.login}\n🔐 Пароль:
-         ${userData.credentials.password}\n\n💡 Сохраните эти данные для выдачи.`)
+    alert(`Участник добавлен!\n\nЛогин: ${userData.credentials.login}\nПароль:
+         ${userData.credentials.password}\n\n Сохраните эти данные для выдачи.`)
   }
 }
 
 const editUser = (user) => {
-  console.log('✏️ Редактировать пользователя:', user)
+  console.log(' Редактировать пользователя:', user)
   selectedUser.value = user
   showEditUserModal.value = true
 }
 
 const deleteUser = async (user) => {
-  console.log('🗑️ Удалить пользователя:', user)
+  console.log('Удалить пользователя:', user)
   
   const userName = `${user.last_name} ${user.first_name}`
   const roleName = user.role_in_event?.name?.toLowerCase() || 'пользователя'
@@ -1408,13 +1418,14 @@ const loadAllData = async () => {
   await Promise.all([
     loadEvent(),
     loadModules(),
-    loadUsers()
+    loadUsers(),
+    loadStatuses()
   ])
 }
 
 onMounted(async () => {
-  console.log('🚀 Загружаем страницу мероприятия')
-  await loadModules()
+  console.log('Загружаем страницу мероприятия')
+  await loadAllData()
   
   // Отладка статусов модулей
   if (modules.value.length > 0) {

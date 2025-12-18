@@ -8,20 +8,28 @@ export const EventsService = {
     return 'Сервис работает'
   },
 
-  async getStatuses() {
+  async getStatuses(context = null) {
     console.log('🏷️ Запрашиваем статусы...')
-    
-    try {
-      const response = await apiClient.get('/statuses')
-      console.log('✅ Статусы получены:', response.data)
-      return response.data
-      
-    } catch (error) {
-      console.error('❌ Ошибка получения статусов:', error)
-      throw error
-    }
-  },
   
+  try {
+    let url = '/statuses'
+    const params = {}
+    
+    if (context) {
+      params.context = context
+      console.log(`🔍 Запрашиваем статусы с контекстом: ${context}`)
+    }
+    
+    const response = await apiClient.get(url, { params })
+    console.log('✅ Статусы получены:', response.data)
+    return response.data
+    
+  } catch (error) {
+    console.error('❌ Ошибка получения статусов:', error)
+    throw error
+  }
+},
+
   // Получить мероприятия с возможностью фильтрации
   async getEvents(filters = {}) {
     console.log('='.repeat(40))
@@ -101,7 +109,7 @@ export const EventsService = {
   
   try {
     // Используем endpoint для статусов по контексту "module"
-    const response = await apiClient.get('/statuses/context/module')
+    const response = await apiClient.get('/statuses', { params: { context: 'module' } })
     console.log('✅ Статусы модулей получены:', response.data)
     return response.data
     
