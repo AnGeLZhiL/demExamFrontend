@@ -585,37 +585,78 @@ const generateSeats = async () => {
 // 🔴 ЗАГРУЗКА ВСЕХ СТАТУСОВ
 const loadStatuses = async () => {
   try {
-    const statuses = await EventsService.getStatuses()
-    allStatuses.value = statuses
+    const statuses = await EventsService.getStatuses({ context_id: 1 })
+    // Удаляем дубликаты по id
+    const uniqueStatuses = Array.from(
+      new Map(statuses.map(s => [s.id, s])).values()
+    )
+    allStatuses.value = uniqueStatuses
+    normalizeStatuses()
   } catch (error) {
     console.error('Ошибка загрузки статусов:', error)
     // Fallback
     allStatuses.value = [
-      { id: 1, name: 'Запланирован' },
-      { id: 2, name: 'Активен' },
-      { id: 3, name: 'Завершен' }
-    ]
+      { id: 1, name: 'Запланирован', context_id: 1 },
+      { id: 2, name: 'Активен', context_id: 1 },
+      { id: 3, name: 'Завершен', context_id: 1 },
+      { id: 4, name: 'Отменен', context_id: 1 }
+    ].filter(s => 
+      !allStatuses.value.some(existing => existing.id === s.id)
+    )
   }
+  normalizeStatuses()
 }
 
 // 🔴 ОТКРЫТИЕ МОДАЛЬНОГО ОКНА РЕДАКТИРОВАНИЯ
 const openEditModal = () => {
+  if (!event.value) return
 
-    console.log('🟢 openEditModal вызвана!', event.value)  // Добавьте эту строку
-  if (!event.value) {
-    console.warn('⚠️ event.value пуст!')
-    return
-  }
-  
-  // Заполняем форму текущими данными
+
   editEventData.value = {
     name: event.value.name,
-    date: formatDateForEdit(event.value.date), // форматируем для datetime-local
-    status_id: event.value.status_id.toString()
+    date: formatDateForEdit(event.value.date),
+    status_id: String(event.value.status_id)
   }
-  
+
+  const currentStatus = allStatuses.value.find(
+    s => String(s.id) === editEventData.value.status_id
+  )
+
+  // Добавляем статус в список, только если его context_id = 1
+  if (
+    !currentStatus && 
+    event.value.status &&
+    event.value.status.context_id === 1
+  ) {
+    allStatuses.value.push({
+      id: event.value.status_id,
+      name: event.value.status.name,
+      context_id: 1
+    })
+    normalizeStatuses()
+  }
+
   showEditModal.value = true
 }
+
+
+const normalizeStatuses = () => {
+  console.log('🔁 Нормализуем статусы:', allStatuses.value)
+
+  // Фильтруем только context_id = 1
+  const filtered = allStatuses.value.filter(s => s.context_id === 1)
+
+  // Удаляем дубли по id
+  const unique = Array.from(
+    new Map(filtered.map(s => [s.id, s])).values()
+  )
+
+  // Сортируем по id
+  allStatuses.value = unique.sort((a, b) => a.id - b.id)
+
+  console.log('✅ Нормализованные статусы:', allStatuses.value)
+}
+
 
 // 🔴 ФОРМАТИРОВАНИЕ ДАТЫ ДЛЯ ПОЛЯ datetime-local
 const formatDateForEdit = (dateString) => {
@@ -644,19 +685,7 @@ const validateEditForm = () => {
     errors.push('Название мероприятия обязательно')
   }
   
-  if (!editEventData.value.date) {
-    errors.push('Дата проведения обязательна')
-  } else {
-    const selectedDate = new Date(editEventData.value.date)
-    if (selectedDate < new Date() && editEventData.value.status_id !== '3') {
-        errors.push('Дата проведения не может быть в прошлом для активных мероприятий')
-    }
-    // if (selectedDate < new Date()) {
-    //   errors.push('Дата проведения не может быть в прошлом')
-    // }
-  }
-  
-  if (!editEventData.value.status_id) {
+    if (!editEventData.value.status_id) {
     errors.push('Статус обязателен')
   }
   
@@ -710,6 +739,12 @@ const updateEvent = async () => {
         
         // Обновляем данные на странице
         event.value = updatedEvent
+
+        if (!event.value.status && event.value.status_id) {
+          event.value.status = allStatuses.value.find(
+            s => String(s.id) === String(event.value.status_id)
+          );
+        }
         
         // Закрываем модальное окно
         closeEditModal()
@@ -1426,7 +1461,6 @@ const loadAllData = async () => {
 onMounted(async () => {
   console.log('Загружаем страницу мероприятия')
   await loadAllData()
-  
   // Отладка статусов модулей
   if (modules.value.length > 0) {
     console.log('🔍 Анализ статусов модулей:')
@@ -1439,6 +1473,7 @@ onMounted(async () => {
       })
     })
   }
+  normalizeStatuses()
 })
 
 </script>

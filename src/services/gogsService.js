@@ -1,11 +1,11 @@
 import apiClient from './api'
 
 export const RepositoryService = {
-  // 1. Тест подключения к Gogs
-    async testGogsConnection() {
-      console.log('🔗 Тестируем подключение к Gogs...')
+  // 1. Тест подключения к Gogs (обновленный URL)
+  async testGogsConnection() {
+    console.log('🔗 Тестируем подключение к Gogs...')
     try {
-      const response = await apiClient.post('/gogs/test-connection') // POST вместо GET
+      const response = await apiClient.get('/gogs/test-connection') // Изменили на GET
       console.log('✅ Gogs статус:', response.data)
       return response.data
     } catch (error) {

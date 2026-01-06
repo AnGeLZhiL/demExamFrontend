@@ -371,9 +371,18 @@ async getEventAccounts(eventId, filters = {}) {
     console.log('🔄 Запрашиваем роли с сервера...')
     
     try {
-        const response = await apiClient.get('/roles')
+        const response = await apiClient.get('/roles?system_role=0')
         console.log('✅ Роли получены:', response.data)
-        return response.data
+        const nonSystemRoles = response.data.filter(role => 
+            role.system_role === 0 || 
+            role.is_system === false || 
+            role.system === false
+        )
+        if (nonSystemRoles.length === 0) {
+            console.warn('⚠️ Сервер вернул роли, но они не помечены как несистемные')
+            console.log('📋 Все полученные роли:', response.data)
+        }
+        return nonSystemRoles.length > 0 ? nonSystemRoles : response.data
         
     } catch (error) {
         console.error('❌ Ошибка загрузки ролей:', error)
@@ -382,15 +391,33 @@ async getEventAccounts(eventId, filters = {}) {
         console.error('Статус:', error.response.status)
         console.error('Данные:', error.response.data)
         }
+
+        // 🔴 Если параметр system_role не поддерживается
+        if (error.response.status === 400 || error.response.status === 422) {
+            console.log('🔄 Пробуем получить все роли без фильтра...')
+            try {
+                const allRolesResponse = await apiClient.get('/roles')
+                console.log('✅ Все роли получены:', allRolesResponse.data)
+                
+                // Фильтруем на клиенте
+                const filteredRoles = allRolesResponse.data.filter(role => 
+                    role.system_role === 0 || 
+                    role.is_system === false
+                )
+                console.log('✅ Отфильтрованы несистемные роли:', filteredRoles)
+                return filteredRoles
+                
+            } catch (secondError) {
+                console.error('❌ Второй запрос тоже не сработал:', secondError)
+            }
+        }
         
         // Fallback
         return [
-        { id: 1, name: 'Администратор' },
-        { id: 2, name: 'Эксперт' },
-        { id: 3, name: 'Участник' },
-        { id: 4, name: 'Главный эксперт' },
-        { id: 5, name: 'Технический эксперт' },
-        { id: 6, name: 'Наблюдатель' }
+        { id: 1, name: 'Эксперт' },
+        { id: 2, name: 'Участник' },
+        { id: 3, name: 'Главный эксперт' },
+        { id: 4, name: 'Технический эксперт' }
         ]
     }
   },

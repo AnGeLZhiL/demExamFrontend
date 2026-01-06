@@ -163,6 +163,39 @@
   <div v-else-if="activeTab === 'databases'" class="databases-tab">
     <div class="section-header">
       <h3>🗄️ Базы данных PostgreSQL</h3>
+      <h4>📝 Создать БД для конкретного участника</h4>
+      <div class="single-create-form">
+        <select 
+          v-model="selectedParticipantId" 
+          class="participant-select"
+          :disabled="creatingSingleDatabase"
+        >
+          <option value="">Выберите участника...</option>
+          <option 
+            v-for="participant in availableParticipants" 
+            :key="participant.id" 
+            :value="participant.id"
+          >
+            {{ participant.name }}
+            <span v-if="participant.seat_number">(Место {{ participant.seat_number }})</span>
+          </option>
+        </select>
+        
+        <button 
+          @click="createSingleDatabase()"
+          class="action-btn single-create-btn"
+          :disabled="!selectedParticipantId || creatingSingleDatabase"
+        >
+          <span v-if="creatingSingleDatabase" class="loading-dots">
+            <span></span><span></span><span></span>
+          </span>
+          <span v-else>Создать БД</span>
+        </button>
+        
+        <div v-if="singleDatabaseError" class="error-message">
+          ❌ {{ singleDatabaseError }}
+        </div>
+      </div>
       <div class="bulk-actions">
         <button 
           @click="loadDatabases" 
@@ -174,22 +207,56 @@
           </span>
           <span v-else>Обновить</span>
         </button>
-        
-        <button @click="testConnectionDirectly" class="action-btn test-btn">
-          Тест подключения
-        </button>
-        
+
         <button 
-          @click="createAllDatabases" 
-          class="action-btn create-btn"
+          @click="syncDatabases" 
+          class="action-btn sync-btn"
           :disabled="creatingDatabases"
+          title="Создает БД для новых участников и обновляет для существующих"
         >
           <span v-if="creatingDatabases" class="loading-dots">
             <span></span><span></span><span></span>
           </span>
-          <span v-else>Создать все базы</span>
+          <span v-else>🚀 Синхронизировать БД</span>
         </button>
-      </div>
+        <button 
+          @click="confirmDropAllDatabases" 
+          class="action-btn danger-btn"
+          :disabled="droppingAllDatabases || databases.length === 0"
+          title="Удалить ВСЕ базы данных модуля"
+          style="background-color: #dc2626; border-color: #dc2626; color: white;"
+        >
+          <span v-if="droppingAllDatabases" class="loading-dots">
+            <span></span><span></span><span></span>
+          </span>
+          <span v-else>⚠️ Удалить ВСЕ БД</span>
+        </button>
+        <button @click="testConnectionDirectly" class="action-btn test-btn">
+          Тест подключения
+        </button>
+        <div class="password-bulk-actions">
+          <!-- ... другие кнопки ... -->
+          
+          <button 
+            @click="lockAllDatabases"
+            class="action-btn small-btn danger-btn"
+            :disabled="lockingDatabase || !hasActiveDatabases"
+            title="Заблокировать все БД (только чтение)"
+          >
+            🔒 Заблокировать все
+          </button>
+          
+          <button 
+            @click="unlockAllDatabases"
+            class="action-btn small-btn success-btn"
+            :disabled="lockingDatabase || !hasLockedDatabases"
+            title="Разблокировать все БД"
+          >
+            🔓 Разблокировать все
+          </button>
+        </div>
+        
+        </div>
     </div>
 
     <!-- Статус -->
@@ -240,29 +307,50 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 80px;">ID</th>
               <th>Название базы</th>
               <th>Пользователь</th>
-              <th>Участник</th>
+              <th>Пароль</th> <!-- ДОБАВЬТЕ ЭТОТ ЗАГОЛОВОК! -->
+              <th>Место</th>
               <th>Статус</th>
+              <th>Действия</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="db in databases" :key="db.id">
-              <td class="id-cell">
-                <span class="id-badge">#{{ db.id }}</span>
-              </td>
               <td>
                 <code class="code-highlight">{{ db.name }}</code>
               </td>
               <td>
                 <code class="code-highlight">{{ db.username }}</code>
               </td>
-              <td class="participant-info-cell">
+              <td>
+                <div class="password-cell">
+                  <code class="password-display">
+                    {{ visiblePasswords[db.id] ? db.password : '••••••••' }}
+                  </code>
+                  <button 
+                    @click="togglePasswordVisibility(db.id)"
+                    class="password-toggle-btn"
+                    :title="visiblePasswords[db.id] ? 'Скрыть пароль' : 'Показать пароль'"
+                  >
+                    <span v-if="visiblePasswords[db.id]">👁️</span>
+                    <span v-else>👁️‍🗨️</span>
+                  </button>
+                  <button 
+                    @click="copyPassword(db.password)" 
+                    class="copy-btn"
+                    :title="db.password ? 'Скопировать пароль' : 'Пароль недоступен'"
+                    :disabled="!db.password"
+                  >
+                    📋
+                  </button>
+                </div>
+              </td>
+              <td>
                 <div v-if="db.event_account?.user">
                   <div class="participant-name">{{ db.event_account.user.name }}</div>
                   <div v-if="db.event_account.seat_number" class="seat-badge">
-                    Место {{ db.event_account.seat_number }}
+                    {{ db.event_account.seat_number }}
                   </div>
                 </div>
                 <span v-else class="text-muted">—</span>
@@ -271,6 +359,37 @@
                 <span class="status-badge" :class="db.is_active ? 'active' : 'inactive'">
                   {{ db.is_active ? '✅ Активна' : '❌ Отключена' }}
                 </span>
+              </td>
+              <td class="actions-cell">
+                <!-- Кнопка блокировки/разблокировки -->
+                <button 
+                  @click="toggleDatabaseLock(db)"
+                  class="action-btn small-btn lock-btn"
+                  :title="db.is_active ? 'Заблокировать БД (только чтение)' : 'Разблокировать БД'"
+                  :disabled="lockingDatabase"
+                >
+                  <span v-if="db.is_active">🔒</span>
+                  <span v-else>🔓</span>
+                </button>
+                <div class="action-buttons">
+                  <!-- Кнопка пересоздать -->
+                  <button 
+                    @click="recreateDatabase(db)"
+                    class="action-btn small-btn refresh-btn"
+                    :disabled="recreatingDatabase"
+                    title="Пересоздать БД"
+                  >
+                    🔄
+                  </button>
+                  <!-- Кнопка удалить -->
+                  <button 
+                    @click="dropDatabase(db.id, db.name)"
+                    class="action-btn small-btn delete-btn"
+                    title="Удалить БД"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -631,6 +750,16 @@ const route = useRoute()
 const router = useRouter()
 const moduleId = route.params.id
 
+const selectedParticipantId = ref('')
+const availableParticipants = ref([])
+const loadingParticipants = ref(false)
+const creatingSingleDatabase = ref(false)
+const singleDatabaseError = ref('')
+const recreatingDatabase = ref(false)
+const recreatingAllDatabases = ref(false)
+const droppingAllDatabases = ref(false)
+
+
 // Данные модуля
 const module = ref(null)
 const loading = ref(true)
@@ -661,25 +790,216 @@ const databases = ref([])
 const loadingDatabases = ref(false)
 const databasesError = ref('')
 const creatingDatabases = ref(false) // ← ДОБАВЬТЕ ЭТО
+const visiblePasswords = ref({})
+const lockingDatabase = ref(false)
 
 const isEditFormValid = computed(() => {
   return editModuleData.value.name.trim() !== '' &&
          editModuleData.value.status_id !== ''
 })
 
-const handleTabChange = (tabName) => {
+const handleTabChange = async (tabName) => {
   activeTab.value = tabName
   
-  // Автоматически загружаем данные при переходе на вкладку БД
   if (tabName === 'databases') {
-    loadDatabases()
+    // Загружаем БД и участников параллельно
+    await Promise.all([
+      loadDatabases(),
+      loadParticipantsForModule()
+    ])
   }
   
-  // Для репозиториев
   if (tabName === 'repositories') {
     loadRepositories()
   }
 }
+
+const loadParticipantsForModule = async () => {
+  try {
+    loadingParticipants.value = true
+    
+    // Проверяем, есть ли у модуля event_id
+    if (!module.value?.event_id) {
+      console.warn('У модуля нет event_id')
+      availableParticipants.value = []
+      return
+    }
+    
+    // Используем существующий метод getEventAccounts
+    console.log('🔄 Загружаем участников для мероприятия:', module.value.event_id)
+    
+    // Получаем учетные записи мероприятия
+    const accounts = await EventsService.getEventAccounts(module.value.event_id, {
+      roles: 'Участник' // Фильтруем только участников
+    })
+    
+    console.log('📋 Получены учетные записи:', accounts)
+    
+    // Преобразуем в формат для селекта
+    availableParticipants.value = accounts
+      .filter(account => account.user)
+      .map(account => {
+        const user = account.user
+        // Формируем ФИО
+        let fullName = ''
+        if (user.last_name || user.first_name || user.middle_name) {
+          fullName = `${user.last_name || ''} ${user.first_name || ''} ${user.middle_name || ''}`.trim()
+        } else {
+          fullName = user.name || user.login || 'Неизвестный'
+        }
+        
+        return {
+          id: account.id, // event_account_id
+          name: fullName, // ФИО вместо логина
+          login: account.login || user.login,
+          seat_number: account.seat_number,
+          user_id: account.user_id,
+          original_account: account
+        }
+      })
+    
+    console.log('✅ Участники подготовлены:', availableParticipants.value)
+    
+  } catch (error) {
+    console.error('❌ Ошибка загрузки участников:', error)
+    
+    // Fallback: демо-данные
+    availableParticipants.value = [
+      { id: 1, name: 'Козлова А.И.', login: 'kozlova_exam1', seat_number: 1 },
+      { id: 2, name: 'Белов С.П.', login: 'belov_exam1', seat_number: 2 },
+      { id: 3, name: 'Соколова М.В.', login: 'sokolova_exam1', seat_number: 3 },
+      { id: 4, name: 'Никитин Д.А.', login: 'nikitin_exam1', seat_number: 4 }
+    ]
+    
+  } finally {
+    loadingParticipants.value = false
+  }
+}
+
+const createSingleDatabase = async () => {
+  if (!selectedParticipantId.value) {
+    alert('Выберите участника')
+    return
+  }
+  
+  const participant = availableParticipants.value.find(p => p.id == selectedParticipantId.value)
+  if (!participant) {
+    alert('Участник не найден')
+    return
+  }
+  
+  if (!confirm(`Создать БД для участника ${participant.name}?\n\nБудет создана новая PostgreSQL база данных.`)) {
+    return
+  }
+  
+  try {
+    creatingSingleDatabase.value = true
+    singleDatabaseError.value = ''
+    
+    console.log('🔄 Создаем БД для участника:', participant)
+    
+    // Вызываем API для создания одной БД
+    const result = await DatabaseService.createDatabaseForParticipant(
+      moduleId, 
+      participant.id
+    )
+    
+    console.log('📦 Полный ответ от сервера:', result)
+    
+    if (result.success) {
+      // Извлекаем данные из правильной структуры
+      const dbName = result.data?.database?.name || 
+                    result.database?.name || 
+                    result.data?.database_name || 
+                    result.database_name || 
+                    'Неизвестно'
+      
+      const username = result.data?.database?.username || 
+                      result.database?.username || 
+                      result.data?.username || 
+                      result.username || 
+                      participant.login
+      
+      const password = result.data?.database?.password || 
+                      result.database?.password || 
+                      result.data?.password || 
+                      result.password || 
+                      '(скрыто)'
+      
+      alert(`✅ БД успешно создана для ${participant.name}\n\n` +
+            `Название: ${dbName}\n` +
+            `Пользователь: ${username}\n` +
+            `Пароль: ${password.length > 0 ? '********' : 'не установлен'}\n\n` +
+            `Для подключения:\n` +
+            `psql -h localhost -p 5432 -U ${username} -d ${dbName}`)
+      
+      // Обновляем список БД
+      await loadDatabases()
+      
+      // Очищаем выбор
+      selectedParticipantId.value = ''
+    } else {
+      throw new Error(result.message || 'Ошибка создания БД')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка создания БД:', error)
+    singleDatabaseError.value = error.message || 'Ошибка создания БД'
+    alert(`❌ ${singleDatabaseError.value}`)
+  } finally {
+    creatingSingleDatabase.value = false
+  }
+}
+
+// Пересоздание БД (для существующей записи)
+const recreateDatabase = async (db) => {
+  // Используем весь объект db
+  if (!db || !db.event_account_id) {
+    alert('Нет данных об участнике')
+    return
+  }
+  
+  const participantName = db.event_account?.user?.name || db.username || 'участника'
+  
+  if (!confirm(`Пересоздать БД для участника ${participantName}?\n\nСтарая БД будет удалена и создана новая.`)) {
+    return
+  }
+  
+  try {
+    recreatingDatabase.value = true
+    
+    console.log('🔄 Пересоздаем БД:', db)
+    
+    // Используем event_account_id из объекта БД
+    const result = await DatabaseService.createDatabaseForParticipant(
+      moduleId, 
+      db.event_account_id
+    )
+    
+    console.log('✅ Результат пересоздания:', result)
+    
+    if (result.success) {
+      alert('✅ БД успешно пересоздана')
+      
+      // Обновляем список БД
+      await loadDatabases()
+    } else {
+      throw new Error(result.message || 'Ошибка пересоздания БД')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка пересоздания БД:', error)
+    alert(`❌ ${error.message || 'Ошибка пересоздания БД'}`)
+  } finally {
+    recreatingDatabase.value = false
+  }
+}
+
+// Заглушка для удаления
+const deleteDatabase = (databaseId) => {
+  alert('Функция удаления БД в разработке')
+}
+
 
 const loadModule = async () => {
   try {
@@ -748,110 +1068,6 @@ const loadDatabases = async () => {
     databasesError.value = error.message || 'Ошибка загрузки баз данных'
   } finally {
     loadingDatabases.value = false
-  }
-}
-
-// Функция создания БД
-const createAllDatabases = async () => {
-  // Более информативное подтверждение
-  const confirmationMessage = `
-Создать PostgreSQL базы данных для всех участников?
-
-ВНИМАНИЕ:
-1. Все существующие базы данных участников будут УДАЛЕНЫ
-2. Будут созданы новые чистые базы данных
-3. Процесс может занять несколько минут
-
-Продолжить?
-`
-  
-  if (!confirm(confirmationMessage)) {
-    return
-  }
-  
-  try {
-    creatingDatabases.value = true
-    databasesError.value = ''
-    
-    console.log('🚀 Компонент: начинаем создание БД для модуля', moduleId)
-    
-    // Показываем уведомление о начале процесса
-    alert('Процесс может занять некоторое время\nПожалуйста, не закрывайте страницу.')
-    
-    const result = await DatabaseService.createDatabasesForModule(moduleId)
-    
-    console.log('✅ Компонент: результат создания', result)
-    
-    // Обрабатываем разные форматы ответа
-    let message = 'Базы данных успешно созданы'
-    let successful = 0
-    let failed = 0
-    
-    if (typeof result === 'object') {
-      if (result.message) {
-        message = result.message
-      }
-      if (result.success !== undefined) {
-        if (!result.success) {
-          throw new Error(result.message || 'Не удалось создать базы данных')
-        }
-      }
-      if (result.summary) {
-        successful = result.summary.successful || 0
-        failed = result.summary.failed || 0
-      } else if (result.results) {
-        successful = result.results.filter(r => r.success).length
-        failed = result.results.filter(r => !r.success).length
-      }
-    }
-    
-    // Формируем детальный отчет
-    let report = `${message}\n\n`
-    report += `Итоги:\n`
-    report += `   • Успешно создано: ${successful}\n`
-    report += `   • Ошибок: ${failed}\n\n`
-    
-    // Добавляем детали по ошибкам, если они есть
-    if (result.results && failed > 0) {
-      report += `📛 Ошибки:\n`
-      result.results.forEach(r => {
-        if (!r.success) {
-          report += `   • ${r.participant_login || 'Участник'}: ${r.error}\n`
-        }
-      })
-    }
-    
-    // Добавляем информацию о подключении
-    if (result.results && successful > 0) {
-      report += `\n🔗 Пример подключения:\n`
-      const firstSuccess = result.results.find(r => r.success)
-      if (firstSuccess) {
-        report += `   psql -h localhost -p 5432 -U ${firstSuccess.username} -d ${firstSuccess.database_name}\n`
-        report += `   Пароль: ${firstSuccess.password || '*****'}`
-      }
-    }
-    
-    alert(report)
-    
-    // Перезагружаем список БД
-    await loadDatabases()
-    
-  } catch (error) {
-    console.error('❌ Компонент: ошибка при создании БД', error)
-    
-    // Показываем понятное сообщение об ошибке
-    let errorMessage = error.message || 'Неизвестная ошибка'
-    
-    // Дополнительная информация для отладки
-    if (errorMessage.includes('Network Error') || errorMessage.includes('Нет ответа')) {
-      errorMessage += '\n\nПроверьте:\n1. Запущен ли сервер Laravel\n2. Доступен ли PostgreSQL сервер\n3. Подключение к сети'
-    }
-    
-    databasesError.value = errorMessage
-    alert(`❌ ${errorMessage}`)
-    
-  } finally {
-    creatingDatabases.value = false
   }
 }
 
@@ -967,6 +1183,127 @@ const createAllRepositories = async () => {
   }
 }
 
+/**
+ * Подтверждение удаления всех БД
+ */
+const confirmDropAllDatabases = () => {
+  if (databases.value.length === 0) {
+    alert('Нет баз данных для удаления')
+    return
+  }
+  
+  const confirmationMessage = `
+⚠️ ⚠️ ⚠️  ОПАСНОЕ ДЕЙСТВИЕ  ⚠️ ⚠️ ⚠️
+
+Вы собираетесь удалить ВСЕ базы данных модуля:
+• Всего БД: ${databases.value.length}
+• Участников с БД: ${new Set(databases.value.map(db => db.event_account_id)).size}
+
+❗ ЭТО ДЕЙСТВИЕ НЕОБРАТИМО
+❗ Все данные в базах будут БЕЗВОЗВРАТНО УДАЛЕНЫ
+❗ Участники потеряют доступ к своим данным
+
+Для подтверждения введите: "УДАЛИТЬ ${databases.value.length} БД"
+  `.trim()
+  
+  const userInput = prompt(confirmationMessage)
+  
+  if (userInput === `УДАЛИТЬ ${databases.value.length} БД`) {
+    dropAllDatabases()
+  } else if (userInput !== null) {
+    alert('❌ Неправильный код подтверждения. Удаление отменено.')
+  }
+}
+
+/**
+ * Удалить ВСЕ базы данных модуля
+ */
+const dropAllDatabases = async () => {
+  try {
+    droppingAllDatabases.value = true
+    
+    const result = await DatabaseService.dropAllDatabases(moduleId)
+    
+    if (result.success) {
+      let message = `✅ ${result.message}\n\n`
+      
+      if (result.details) {
+        message += `📊 Статистика:\n`
+        message += `   • Всего найдено: ${result.details.total_found}\n`
+        message += `   • ✅ Успешно удалено: ${result.details.successfully_deleted}\n`
+        message += `   • ❌ Ошибок: ${result.details.failed}\n`
+      }
+      
+      if (result.errors && result.errors.length > 0) {
+        message += `\n⚠️ Ошибки удаления:\n`
+        result.errors.slice(0, 3).forEach((error, index) => {
+          message += `   ${index + 1}. ${error.database_name}: ${error.error}\n`
+        })
+        if (result.errors.length > 3) {
+          message += `   ... и еще ${result.errors.length - 3} ошибок\n`
+        }
+      }
+      
+      alert(message)
+      
+      // Очищаем локальный список
+      databases.value = []
+      
+    } else {
+      throw new Error(result.message || 'Ошибка удаления БД')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка массового удаления БД:', error)
+    
+    let errorMessage = error.message || 'Неизвестная ошибка'
+    
+    // Показываем детальную ошибку
+    if (error.response?.data?.errors) {
+      errorMessage += '\n\nДетали ошибок:\n'
+      error.response.data.errors.slice(0, 3).forEach((err, i) => {
+        errorMessage += `${i + 1}. ${err.database_name}: ${err.error}\n`
+      })
+    }
+    
+    alert(`❌ ${errorMessage}`)
+    
+  } finally {
+    droppingAllDatabases.value = false
+  }
+}
+
+/**
+ * Безопасное удаление (только записи, не БД PostgreSQL)
+ */
+const safeDeleteAllDatabases = async () => {
+  if (!confirm(`Безопасно удалить все записи о БД?\n\nБудут удалены только записи из системы, но БД в PostgreSQL останутся.`)) {
+    return
+  }
+  
+  try {
+    droppingAllDatabases.value = true
+    
+    // Удаляем записи из БД приложения
+    const response = await apiClient.delete(
+      `/modules/${moduleId}/databases/delete-records`,
+      { timeout: 30000 }
+    )
+    
+    if (response.data.success) {
+      alert(`✅ Удалено записей: ${response.data.deleted_count}\n\nТеперь вы можете:\n1. Создать новые БД через "Синхронизировать БД"\n2. Вручную удалить реальные БД PostgreSQL`)
+      
+      // Очищаем список
+      databases.value = []
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка безопасного удаления:', error)
+    alert(`❌ ${error.message || 'Ошибка удаления записей'}`)
+  } finally {
+    droppingAllDatabases.value = false
+  }
+}
 
 const toggleRepositoryAccess = async (repo) => {
   const action = repo.is_active ? 'заблокировать' : 'разблокировать'
@@ -983,6 +1320,23 @@ const toggleRepositoryAccess = async (repo) => {
   } catch (error) {
     alert(`❌ ${error.message}`)
   }
+}
+
+const copyPassword = (password) => {
+  if (!password) {
+    alert('Пароль недоступен')
+    return
+  }
+  
+  navigator.clipboard.writeText(password)
+    .then(() => {
+      // Показать уведомление
+      alert('✅ Пароль скопирован в буфер обмена')
+    })
+    .catch(err => {
+      console.error('Ошибка копирования:', err)
+      alert('❌ Не удалось скопировать пароль')
+    })
 }
 
 const deleteRepository = async (repo) => {
@@ -1065,6 +1419,27 @@ const openEditModal = () => {
   }
   
   showEditModal.value = true
+}
+
+/**
+ * Переключение видимости пароля
+ */
+const togglePasswordVisibility = (databaseId) => {
+  if (visiblePasswords.value[databaseId]) {
+    // Если пароль уже показан - скрываем
+    visiblePasswords.value[databaseId] = false
+  } else {
+    // Показываем пароль
+    visiblePasswords.value[databaseId] = true
+
+    
+    // Автоматически скрываем через 30 секунд
+    setTimeout(() => {
+      if (visiblePasswords.value[databaseId]) {
+        visiblePasswords.value[databaseId] = false
+      }
+    }, 30000)
+  }
 }
 
 const closeEditModal = () => {
@@ -1160,6 +1535,134 @@ const deleteModule = async () => {
   }
 }
 
+/**
+ * Пересоздать БД для конкретного участника (кнопка 🔄 в таблице)
+ */
+const syncSingleDatabase = async (participant) => {
+  const participantName = participant.name || participant.participant_name || participant.username
+  
+  if (!confirm(`Синхронизировать БД для участника "${participantName}"?\n\nЕсли БД уже существует, она будет пересоздана.`)) {
+    return
+  }
+  
+  try {
+    recreatingDatabase.value = true
+    
+    console.log('🔄 Синхронизация БД для участника:', participant)
+    
+    const result = await DatabaseService.recreateDatabaseForParticipant(
+      moduleId, 
+      participant.id || participant.event_account_id
+    )
+    
+    console.log('✅ Результат:', result)
+    
+    alert(`✅ БД для "${participantName}" синхронизирована!\n\nНазвание БД: ${result.database.name}\nПользователь: ${result.database.username}`)
+    
+    // Обновляем список БД
+    await loadDatabases()
+    
+  } catch (error) {
+    console.error('❌ Ошибка синхронизации БД для участника:', error)
+    alert(`❌ ${error.message || 'Ошибка синхронизации БД'}`)
+  } finally {
+    recreatingDatabase.value = false
+  }
+}
+
+/**
+ * Универсальная синхронизация БД
+ * - Создает БД для новых участников
+ * - Пересоздает БД для существующих участников
+ */
+const syncDatabases = async () => {
+  const confirmationMessage = `
+🚀 СИНХРОНИЗАЦИЯ БАЗ ДАННЫХ
+
+Что будет сделано:
+✅ Для участников БЕЗ БД: будут созданы новые БД
+✅ Для участников С БД: БД будут пересозданы (данные удалятся!)
+📊 Все участники модуля будут обработаны
+
+Продолжить?
+`
+  
+  if (!confirm(confirmationMessage)) {
+    return
+  }
+  
+  try {
+    creatingDatabases.value = true
+    databasesError.value = ''
+    
+    alert('🔄 Запущена синхронизация БД. Пожалуйста, подождите...')
+    
+    // Используем универсальный метод
+    const result = await DatabaseService.syncDatabasesForModule(moduleId)
+    
+    console.log('✅ Результат синхронизации:', result)
+    
+    if (result.success) {
+      // Формируем детальный отчет
+      let report = `🎉 ${result.message}\n\n`
+      report += `📊 Статистика:\n`
+      report += `   • Участников всего: ${result.details.total_participants}\n`
+      report += `   • 📝 Создано новых БД: ${result.details.created}\n`
+      report += `   • 🔄 Обновлено БД: ${result.details.updated}\n`
+      report += `   • ❌ Ошибок: ${result.details.failed}\n\n`
+      
+      // Добавляем информацию о подключении
+      if (result.results && result.results.length > 0) {
+        const firstSuccess = result.results.find(r => r.success && r.action === 'created')
+        if (firstSuccess) {
+          report += `🔗 Пример подключения к новой БД:\n`
+          report += `   psql -h ${window.location.hostname} -p 5432 -U ${firstSuccess.username} -d ${firstSuccess.database_name}\n`
+        }
+      }
+      
+      alert(report)
+    } else {
+      throw new Error(result.message || 'Ошибка синхронизации')
+    }
+    
+    // Обновляем список БД
+    await loadDatabases()
+    
+  } catch (error) {
+    console.error('❌ Ошибка синхронизации БД:', error)
+    
+    let errorMessage = error.message || 'Неизвестная ошибка'
+    databasesError.value = errorMessage
+    
+    alert(`❌ ${errorMessage}\n\nПроверьте логи сервера для деталей.`)
+    
+  } finally {
+    creatingDatabases.value = false
+  }
+}
+
+/**
+ * Удалить БД (только удаление)
+ */
+const dropDatabase = async (databaseId, databaseName) => {
+  if (!confirm(`Удалить базу данных "${databaseName}"?\n\nЭто действие нельзя отменить.`)) {
+    return
+  }
+  
+  try {
+    const result = await DatabaseService.dropDatabase(databaseId)
+    
+    alert(result.message || 'База данных удалена')
+    
+    // Удаляем из локального списка
+    databases.value = databases.value.filter(db => db.id !== databaseId)
+    
+  } catch (error) {
+    console.error('❌ Ошибка удаления БД:', error)
+    alert(`❌ ${error.message || 'Ошибка удаления БД'}`)
+  }
+}
+
 const getStatusClass = (statusId) => {
   const classes = {
     1: 'status-planned',
@@ -1168,6 +1671,152 @@ const getStatusClass = (statusId) => {
     4: 'status-cancelled'
   }
   return classes[statusId] || 'status-unknown'
+}
+
+const hasActiveDatabases = computed(() => {
+  return databases.value.some(db => db.is_active)
+})
+
+const hasLockedDatabases = computed(() => {
+  return databases.value.some(db => !db.is_active)
+})
+
+/**
+ * Блокировка всех БД
+ */
+const lockAllDatabases = async () => {
+  const activeCount = databases.value.filter(db => db.is_active).length
+  
+  if (activeCount === 0) {
+    alert('Нет активных БД для блокировки')
+    return
+  }
+  
+  const reason = prompt(`Блокировка всех ${activeCount} БД.\nУкажите причину:`, 'Экзамен завершен') || ''
+  
+  if (!confirm(`ЗАБЛОКИРОВАТЬ ВСЕ ${activeCount} БД?\n\n⚠️  ВНИМАНИЕ ⚠️\n• БД перейдут в режим "ТОЛЬКО ЧТЕНИЕ"\n• Пользователи НЕ СМОГУТ создавать объекты\n• Пароли будут изменены\n• Для разблокировки нужна будет административная операция`)) {
+    return
+  }
+  
+  try {
+    lockingDatabase.value = true
+    
+    const promises = databases.value
+      .filter(db => db.is_active)
+      .map(db => DatabaseService.toggleDatabaseLock(db.id, 'lock', reason))
+    
+    const results = await Promise.allSettled(promises)
+    
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length
+    const failed = results.filter(r => r.status === 'rejected').length
+    
+    let message = `📊 РЕЗУЛЬТАТЫ БЛОКИРОВКИ:\n\n`
+    message += `✅ Успешно заблокировано: ${successful} БД\n`
+    message += `❌ Ошибок: ${failed}\n\n`
+    
+    if (successful > 0) {
+      message += `🔒 Заблокированные БД:\n`
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value.success) {
+          const db = databases.value.filter(db => db.is_active)[index]
+          message += `• ${db.name} (${db.username})\n`
+        }
+      })
+    }
+    
+    alert(message)
+    
+    // Обновляем список БД
+    await loadDatabases()
+    
+  } catch (error) {
+    console.error('❌ Ошибка массовой блокировки:', error)
+    alert(`❌ ${error.message || 'Ошибка массовой блокировки'}`)
+  } finally {
+    lockingDatabase.value = false
+  }
+}
+
+/**
+ * Разблокировка всех БД
+ */
+const unlockAllDatabases = async () => {
+  const lockedCount = databases.value.filter(db => !db.is_active).length
+  
+  if (lockedCount === 0) {
+    alert('Нет заблокированных БД')
+    return
+  }
+  
+  if (!confirm(`Разблокировать все ${lockedCount} БД?\n\nПользователи получат полный доступ.`)) {
+    return
+  }
+  
+  try {
+    lockingDatabase.value = true
+    
+    const promises = databases.value
+      .filter(db => !db.is_active)
+      .map(db => DatabaseService.toggleDatabaseLock(db.id, 'unlock'))
+    
+    const results = await Promise.allSettled(promises)
+    
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length
+    const failed = results.filter(r => r.status === 'rejected').length
+    
+    alert(`✅ Разблокировано: ${successful} БД\n❌ Ошибок: ${failed}`)
+    
+    // Обновляем список
+    await loadDatabases()
+    
+  } catch (error) {
+    console.error('❌ Ошибка массовой разблокировки:', error)
+    alert(`❌ ${error.message || 'Ошибка массовой разблокировки'}`)
+  } finally {
+    lockingDatabase.value = false
+  }
+}
+
+/**
+ * Блокировка/разблокировка БД (только чтение)
+ */
+const toggleDatabaseLock = async (database) => {
+  const action = database.is_active ? 'lock' : 'unlock'
+  const actionText = database.is_active ? 'заблокировать' : 'разблокировать'
+  const participantName = database.event_account?.user?.name || database.username
+  
+  const message = database.is_active 
+    ? `Заблокировать БД для участника ${participantName}?\n\nПользователь сможет войти, но не сможет:\n• Создавать таблицы\n• Изменять данные\n• Удалять данные\n• Создавать функции`
+    : `Разблокировать БД для участника ${participantName}?\n\nПользователь получит полный доступ.`
+  
+  if (!confirm(message)) {
+    return
+  }
+  
+  try {
+    lockingDatabase.value = true
+    
+    // Запрашиваем причину для блокировки
+    let reason = ''
+    if (action === 'lock') {
+      reason = prompt('Укажите причину блокировки (необязательно):', 'Административная блокировка') || ''
+    }
+    
+    const result = await DatabaseService.toggleDatabaseLock(database.id, action, reason)
+    
+    if (result.success) {
+      alert(`✅ ${result.message}`)
+      
+      const updatedDb = await DatabaseService.getDatabase(database.id)
+      Object.assign(database, updatedDb)
+    }
+    
+  } catch (error) {
+    console.error(`❌ Ошибка ${action === 'lock' ? 'блокировки' : 'разблокировки'} БД:`, error)
+    alert(`❌ ${error.message || `Ошибка ${actionText} БД`}`)
+  } finally {
+    lockingDatabase.value = false
+  }
 }
 
 const formatDate = (dateString) => {
@@ -1307,7 +1956,6 @@ onMounted(async () => {
 
 /* ===== Стили для ID ячейки ===== */
 .id-cell {
-  width: 70px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 0.9rem;
   font-weight: 600;
@@ -1324,7 +1972,7 @@ onMounted(async () => {
   font-weight: 600;
   color: #3b82f6;
   border: 2px solid #dbeafe;
-  min-width: 40px;
+  min-width: 10px;
   text-align: center;
 }
 
@@ -1347,9 +1995,7 @@ td:last-child {
 }
 
 /* Стили для ячеек с участниками в таблице БД */
-.participant-info-cell {
-  min-width: 200px;
-}
+
 
 .participant-name {
   font-weight: 600;
@@ -1468,6 +2114,7 @@ td:last-child {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   border: 1px solid #e2e8f0;
   margin-top: 1rem;
+  overflow-x: auto;
 }
 
 table {
@@ -1748,6 +2395,45 @@ th {
   cursor: not-allowed;
 }
 
+.password-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 150px;
+}
+
+.password-display {
+  font-family: 'Courier New', monospace;
+  background: #f8f9fa;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  font-size: 0.85rem;
+  word-break: break-all;
+  flex: 1;
+  color: black;
+}
+
+.copy-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.copy-btn:hover {
+  background: #e9ecef;
+}
+
+.copy-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .edit-btn {
   background: white;
   color: #374151;
@@ -1817,6 +2503,24 @@ th {
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* Добавьте в стили компонента */
+.danger-btn {
+  background-color: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: white !important;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background-color: #b91c1c !important;
+  border-color: #b91c1c !important;
+}
+
+.danger-btn:disabled {
+  background-color: #fca5a5 !important;
+  border-color: #fca5a5 !important;
+  opacity: 0.7;
 }
 
 .status-badge.small {
@@ -2899,6 +3603,51 @@ th {
   line-height: 1.6;
 }
 
+/* Добавьте эти стили */
+
+/* Стиль для кнопки синхронизации */
+.sync-btn {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+
+.sync-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.sync-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Остальные кнопки */
+.test-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+}
+
+.create-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .bulk-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  
+  .bulk-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .edit-settings-btn {
   padding: 0.75rem 1.5rem;
   background: #2E80ED;
@@ -3126,6 +3875,134 @@ th {
 
 .error-message strong {
   font-weight: 600;
+}
+
+/* В стилях компонента добавьте */
+.create-single-section {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.create-single-section h4 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: #333;
+}
+
+.single-create-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.participant-select {
+  flex: 1;
+  min-width: 250px;
+  padding: 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: white;
+}
+
+.single-create-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.single-create-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.small-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.9rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+
+.refresh-btn {
+  color: #007bff;
+}
+
+.refresh-btn:hover {
+  background: #e7f1ff;
+}
+
+.delete-btn {
+  color: #dc3545;
+}
+
+.delete-btn:hover {
+  background: #f8d7da;
+}
+
+.actions-cell {
+  min-width: 120px;
+  text-align: center;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.recreate-all-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+}
+
+.recreate-all-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+/* Разные стили для кнопок создания и пересоздания */
+.create-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+}
+
+.create-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+.lock-btn {
+  background: #f59e0b !important;
+  border-color: #f59e0b !important;
+  color: white !important;
+}
+
+.lock-btn:hover:not(:disabled) {
+  background: #d97706 !important;
+  border-color: #d97706 !important;
+}
+
+.lock-btn:disabled {
+  background: #fbbf24 !important;
+  border-color: #fbbf24 !important;
+  opacity: 0.7;
 }
 
 @keyframes fadeIn {
