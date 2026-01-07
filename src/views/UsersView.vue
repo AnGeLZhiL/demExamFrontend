@@ -8,6 +8,20 @@
         <button @click="openAddModal" class="btn btn-primary">
           + Добавить пользователя
         </button>
+
+        <button @click="openImportModal" class="btn btn-success">
+          📥 Импорт групп
+        </button>
+
+        <button 
+          v-if="selectedUsers.length > 0"
+          @click="confirmBulkDelete"
+          class="btn btn-danger"
+          :disabled="isBulkDeleting"
+        >
+          <span v-if="isBulkDeleting">🔄 Удаление...</span>
+          <span v-else>🗑️ Удалить выбранных ({{ selectedUsers.length }})</span>
+        </button>
       </div>
     </div>
 
@@ -52,6 +66,24 @@
           <option value="regular">Обычные</option>
         </select>
       </div>
+      <!-- Кнопки управления выбором -->
+      <div class="selection-controls">
+        <button 
+          @click="toggleSelectAll"
+          class="btn btn-sm btn-secondary"
+          :disabled="filteredUsers.length === 0"
+        >
+          {{ isAllSelected ? 'Снять выделение' : 'Выделить всех' }}
+        </button>
+        
+        <button 
+          @click="clearSelection"
+          class="btn btn-sm btn-secondary"
+          :disabled="selectedUsers.length === 0"
+        >
+          Очистить выбор
+        </button>
+      </div>
     </div>
 
     <!-- Таблица пользователей -->
@@ -59,26 +91,54 @@
       <table class="users-table">
         <thead>
           <tr>
+            <th style="width: 40px;">
+              <input
+                type="checkbox"
+                :checked="isAllSelected"
+                @change="toggleSelectAll"
+                :disabled="filteredUsers.length === 0"
+              />
+            </th>
             <th>№</th>
             <th>Фамилия</th>
             <th>Имя</th>
             <th>Отчество</th>
             <th>Группа</th>
+            <th style="width: 120px;">Действия</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="6" class="loading">Загрузка...</td>
+            <!-- Обновите colspan с 6 на 7 -->
+            <td colspan="8" class="loading">Загрузка...</td>
           </tr>
           <tr v-else-if="filteredUsers.length === 0">
-            <td colspan="6" class="empty">Пользователи не найдены</td>
+            <!-- Обновите colspan с 6 на 7 -->
+            <td colspan="8" class="empty">Пользователи не найдены</td>
           </tr>
-          <tr v-else v-for="(user, index) in filteredUsers" :key="user.id">
+          <tr 
+            v-else 
+            v-for="(user, index) in filteredUsers" 
+            :key="user.id"
+            :class="{ 'selected-row': isUserSelected(user.id) }"
+          >
+            <!-- НОВАЯ колонка с чекбоксом -->
+            <td>
+              <input
+                type="checkbox"
+                :checked="isUserSelected(user.id)"
+                @change="toggleUserSelection(user.id)"
+                :disabled="isDeleteDisabled(user)"
+              />
+            </td>
+            
             <td :class="{ 'fw-bold': user.is_system_account }">{{ index + 1 }}</td>
             <td :class="{ 'fw-bold': user.is_system_account }">{{ user.last_name }}</td>
             <td :class="{ 'fw-bold': user.is_system_account }">{{ user.first_name }}</td>
             <td :class="{ 'fw-bold': user.is_system_account }">{{ user.middle_name || '-' }}</td>
-            <td :class="{ 'fw-bold': user.is_system_account }">{{ user.group ? user.group.number : '-' }}</td>
+            <td :class="{ 'fw-bold': user.is_system_account }">
+              {{ user.group ? user.group.number : '-' }}
+            </td>
             <td class="actions">
               <!-- Кнопка «Обновить» -->
               <button
@@ -101,6 +161,18 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Пагинация/инфо -->
+    <div class="table-footer">
+      <div class="selection-info" v-if="selectedUsers.length > 0">
+        Выбрано: <strong>{{ selectedUsers.length }}</strong> из {{ filteredUsers.length }} 
+        (всего: {{ users.length }})
+      </div>
+      
+      <div class="users-count" v-else>
+        Найдено: <strong>{{ filteredUsers.length }}</strong> из {{ users.length }}
+      </div>
     </div>
 
     <!-- Модальное окно добавления пользователя -->
@@ -373,18 +445,137 @@
         </form>
       </div>
     </div>
-
+    <!-- Модальное окно импорта групп -->
+    <div v-if="showImportModal" class="modal-overlay">
+      <div class="modal-content modal-wide">
+        <h3>📥 Импорт групп с портала НОВГУ</h3>
+        
+        <div class="import-container">
+          <!-- Поиск групп -->
+          <div class="search-section">
+            <div class="form-group">
+              <label>Номер группы для поиска (можно частично):</label>
+              <div class="search-input-with-button">
+                <input
+                  v-model="importSearchTerm"
+                  @input="handleImportSearch"
+                  type="text"
+                  placeholder="Например: 3999, 101, ИСП"
+                  class="search-input-full"
+                  :disabled="isSearchingGroups"
+                />
+                <button 
+                  @click="searchGroupsFromUniversity"
+                  class="btn btn-primary"
+                  :disabled="isSearchingGroups || !importSearchTerm.trim()"
+                >
+                  <span v-if="isSearchingGroups">🔍 Поиск...</span>
+                  <span v-else>Найти</span>
+                </button>
+              </div>
+              <small class="hint">Поиск по порталу portal.novsu.ru</small>
+            </div>
+          </div>
+          
+          <!-- Результаты поиска -->
+          <div v-if="foundGroups.length > 0" class="results-section">
+            <h4>Найдено групп: {{ foundGroups.length }}</h4>
+            
+            <div class="groups-list">
+              <div 
+                v-for="group in foundGroups" 
+                :key="group.id"
+                class="group-item"
+                :class="{ 'selected': selectedImportGroup?.number === group.number }"
+                @click="selectImportGroup(group)"
+              >
+                <div class="group-header">
+                  <div class="group-number">
+                    <strong>{{ group.number }}</strong>
+                    <span v-if="group.students_count" class="badge">
+                      {{ group.students_count }} студентов
+                    </span>
+                  </div>
+                  <div class="group-select-indicator">
+                    <input 
+                      type="radio" 
+                      :checked="selectedImportGroup?.number === group.number"
+                      @change="selectImportGroup(group)"
+                    />
+                  </div>
+                </div>
+                
+                <div class="group-details">
+                  <div v-if="group.direction" class="detail">
+                    <strong>Направление:</strong> {{ group.direction }}
+                  </div>
+                  <div v-if="group.profile" class="detail">
+                    <strong>Профиль:</strong> {{ group.profile }}
+                  </div>
+                  <div v-if="group.course" class="detail">
+                    <strong>Курс:</strong> {{ group.course }}
+                  </div>
+                  <div v-if="group.institute" class="detail">
+                    <strong>Институт:</strong> {{ group.institute }}
+                  </div>
+                  <div v-if="group.form" class="detail">
+                    <strong>Форма:</strong> {{ group.form }}
+                  </div>
+                  <div v-if="group.admission_year" class="detail">
+                    <strong>Год поступления:</strong> {{ group.admission_year }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Сообщение если ничего не найдено -->
+          <div v-else-if="importSearchTerm.trim() && !isSearchingGroups" class="no-results">
+            <p>Группы не найдены. Попробуйте другой номер.</p>
+          </div>
+          
+          <!-- Выбранная группа -->
+          <div v-if="selectedImportGroup" class="selected-group-info">
+            <div class="alert alert-info">
+              <strong>Выбрана группа:</strong> {{ selectedImportGroup.number }}
+              <div v-if="selectedImportGroup.students_count">
+                Будет импортировано {{ selectedImportGroup.students_count }} студентов
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="modal-actions">
+          <button 
+            type="button" 
+            @click="closeImportModal"
+            class="btn btn-secondary"
+          >
+            Отмена
+          </button>
+          <button 
+            type="button" 
+            @click="importSelectedGroup"
+            class="btn btn-success"
+            :disabled="!selectedImportGroup || isSearchingGroups"
+          >
+            📥 Импортировать выбранную группу
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive  } from 'vue'
+import { ref, computed, onMounted, reactive, watch  } from 'vue'
 import { UsersService } from '@/services/usersService'
 import { GroupsService } from '@/services/groupsService'
 import { SystemRolesService } from '@/services/systemRolesService'
 import { EventAccountsService } from '@/services/eventAccountsService'
 import { AuthService } from '@/services/authService'
 import { SystemAccountService } from '@/services/systemAccountService'
+import { UniversityParserService } from '@/services/universityParserService'
 
 // Данные
 const isSystemUser = ref(false)
@@ -438,6 +629,17 @@ const selectedStatus = ref('');
 // Состояние для генерации
 const isGeneratingPassword = ref(false);
 const generatedPassword = ref('');
+
+// Данные для массового удаления
+const selectedUsers = ref([]) // Массив ID выбранных пользователей
+const isBulkDeleting = ref(false)
+
+// Данные для импорта групп
+const showImportModal = ref(false)
+const importSearchTerm = ref('')
+const foundGroups = ref([])
+const isSearchingGroups = ref(false)
+const selectedImportGroup = ref(null)
 
 // Загрузка пользователей
 const loadUsers = async () => {
@@ -547,7 +749,9 @@ const loadCurrentUser = async () => {
 // Функция загрузки групп
 const loadGroups = async () => {
   try {
+    console.log('🔄 Загружаем актуальный список групп...')
     groups.value = await GroupsService.getAllGroups()
+    console.log('✅ Группы загружены:', groups.value.length)
   } catch (error) {
     console.error('Ошибка загрузки групп:', error)
     groups.value = []
@@ -613,7 +817,6 @@ const openAddModal = async () => {
   selectedRoleId.value = null
   showCreateGroupForm.value = false
   newGroupNumber.value = ''
-
 
   // Загружаем группы и роли при открытии модалки
   await Promise.all([
@@ -688,7 +891,7 @@ const createUser = async () => {
 
     // Валидация обязательных полей
     if (!newUser.value.last_name || !newUser.value.first_name) {
-      errorMessage.value = 'Заполните все обязательные поля (Фамилия, Имя, Группа)'
+      errorMessage.value = 'Заполните все обязательные поля (Фамилия, Имя)'
       return
     }
 
@@ -707,6 +910,23 @@ const createUser = async () => {
     try {
       // Создаём пользователя
       createdUser = await UsersService.createUser(newUser.value)
+      
+      // 🔴 ДОБАВЛЯЕМ: Загружаем полные данные пользователя с сервера
+      // чтобы получить связанную группу
+      try {
+        const fullUserData = await UsersService.getUserById(createdUser.id)
+        createdUser = fullUserData.user || fullUserData
+      } catch (loadError) {
+        console.error('Не удалось загрузить полные данные пользователя:', loadError)
+        // Если не удалось загрузить, добавляем группу вручную
+        if (newUser.value.group_id) {
+          const selectedGroup = groups.value.find(g => g.id === newUser.value.group_id)
+          if (selectedGroup) {
+            createdUser.group = selectedGroup
+          }
+        }
+      }
+      
     } catch (userError) {
       console.error('Ошибка создания пользователя:', userError)
       errorMessage.value = userError.response?.data?.error || 'Не удалось добавить пользователя'
@@ -723,7 +943,6 @@ const createUser = async () => {
         })
 
         const { login, raw_password } = systemAccountResponse.credentials
-
 
         alert(`
           Системная учётная запись создана!
@@ -749,7 +968,12 @@ const createUser = async () => {
       }
     }
 
+    // Добавляем пользователя в список
     users.value.push(createdUser)
+    
+    // 🔴 ДОБАВЛЯЕМ: Перезагружаем список пользователей для синхронизации
+    await loadUsers()
+    
     closeModal()
     alert('Пользователь добавлен успешно!')
 
@@ -782,6 +1006,15 @@ const filteredUsers = computed(() => {
   });
 })
 
+// Проверка, выделены ли все пользователи
+const isAllSelected = computed(() => {
+  if (filteredUsers.value.length === 0) return false
+  // Проверяем, что все НЕзаблокированные пользователи выделены
+  const selectableUsers = filteredUsers.value.filter(user => !isDeleteDisabled(user))
+  return selectableUsers.length > 0 && 
+         selectableUsers.every(user => selectedUsers.value.includes(user.id))
+})
+
 // Функция для применения фильтров (вызывается при изменении фильтра)
 const applyFilters = () => {
   // Перезагрузка не нужна — computed автоматически обновит filteredUsers
@@ -802,6 +1035,8 @@ const openEditModal = async (user) => {
   console.log('=== OPEN EDIT MODAL START ===')
   
   try {
+    await loadGroups()
+
     // Загружаем системные роли если нужно
     if (systemRoles.value.length === 0) {
       await loadSystemRoles()
@@ -922,17 +1157,12 @@ const deleteUser = async (userId) => {
     }
     
     console.log('🗑️ Удаляем пользователя ID:', userId);
-    
-    // 🔴 ИСПРАВЛЕНИЕ: Используем UsersService вместо apiClient
-    // Вызываем API удаления через сервис
-    // Если в UsersService нет метода deleteUser, нужно его добавить
-    
-    // Вариант 1: Через импортированный UsersService (если есть метод)
+  
     await UsersService.deleteUser(userId);
     
-    // ИЛИ Вариант 2: Если нужно добавить метод в UsersService, сначала добавьте его:
-    
-    loading.value = false;
+    setTimeout(async () => {
+      await loadGroups()
+    }, 500)
     
     // Удаляем из списка
     users.value = users.value.filter(u => u.id !== userId);
@@ -1149,6 +1379,325 @@ const deleteSystemAccounts = async (userId) => {
   }
 }
 
+// Проверка выбран ли пользователь
+const isUserSelected = (userId) => {
+  return selectedUsers.value.includes(userId)
+}
+
+// Переключение выбора пользователя
+const toggleUserSelection = (userId) => {
+  const index = selectedUsers.value.indexOf(userId)
+  if (index === -1) {
+    selectedUsers.value.push(userId)
+  } else {
+    selectedUsers.value.splice(index, 1)
+  }
+}
+
+// Выделить/снять выделение всех
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedUsers.value = []
+  } else {
+    const selectableUsers = filteredUsers.value // должно быть .value
+      .filter(user => !isDeleteDisabled(user))
+      .map(user => user.id)
+    selectedUsers.value = [...new Set([...selectedUsers.value, ...selectableUsers])]
+  }
+}
+
+// Очистить выбор
+const clearSelection = () => {
+  selectedUsers.value = []
+}
+
+// Подтверждение массового удаления
+const confirmBulkDelete = () => {
+  if (selectedUsers.value.length === 0) {
+    alert('Нет выбранных пользователей для удаления')
+    return
+  }
+  
+  // Проверяем, нет ли среди выбранных защищенных пользователей
+  const protectedUsers = selectedUsers.value.filter(userId => {
+    const user = getUserById(userId)
+    return user && isDeleteDisabled(user)
+  })
+  
+  if (protectedUsers.length > 0) {
+    const protectedNames = protectedUsers
+      .map(id => getUserById(id))
+      .filter(user => user)
+      .map(user => `${user.last_name} ${user.first_name}`)
+      .join(', ')
+    
+    alert(`❌ Невозможно удалить некоторых пользователей:\n${protectedNames}\n\n` +
+          `Они защищены от удаления (ID=1 или это ваша учётная запись).\n\n` +
+          `Удалим остальных выбранных пользователей?`)
+    
+    // Убираем защищенных пользователей из выбранных
+    selectedUsers.value = selectedUsers.value.filter(id => !protectedUsers.includes(id))
+    
+    if (selectedUsers.value.length === 0) {
+      return
+    }
+  }
+  
+  // Получаем имена выбранных пользователей
+  const userNames = selectedUsers.value
+    .map(id => getUserById(id))
+    .filter(user => user)
+    .map(user => `• ${user.last_name} ${user.first_name}`)
+    .join('\n')
+  
+  const confirmed = confirm(
+    `🗑️ УДАЛЕНИЕ ${selectedUsers.value.length} ПОЛЬЗОВАТЕЛЕЙ\n\n` +
+    `Список для удаления:\n${userNames}\n\n` +
+    `⚠️ ВНИМАНИЕ:\n` +
+    `• Будут удалены все учётные записи этих пользователей в мероприятиях\n` +
+    `• Будут удалены все связанные системные аккаунты\n` +
+    `• Действие нельзя отменить\n\n` +
+    `Продолжить удаление?`
+  )
+  
+  if (confirmed) {
+    executeBulkDelete()
+  }
+}
+
+// Выполнить массовое удаление
+const executeBulkDelete = async () => {
+  if (selectedUsers.value.length === 0) return
+  
+  try {
+    isBulkDeleting.value = true
+    
+    const total = selectedUsers.value.length
+    let deleted = 0
+    let errors = []
+    
+    // Создаем копию массива для удаления
+    const usersToDelete = [...selectedUsers.value]
+    
+    for (const userId of usersToDelete) {
+      try {
+        const user = getUserById(userId)
+        if (!user) {
+          errors.push({ userId, error: 'Пользователь не найден в списке' })
+          continue
+        }
+        
+        // Пропускаем защищенных пользователей (на всякий случай)
+        if (isDeleteDisabled(user)) {
+          console.log(`Пропускаем защищенного пользователя: ${user.last_name} ${user.first_name}`)
+          errors.push({ userId, error: 'Защищенный пользователь' })
+          continue
+        }
+        
+        console.log(`🗑️ Удаляем пользователя: ${user.last_name} ${user.first_name}`)
+        await UsersService.deleteUser(userId)
+        deleted++
+        
+        // Удаляем из общего списка
+        const index = users.value.findIndex(u => u.id === userId)
+        if (index > -1) {
+          users.value.splice(index, 1)
+        }
+        
+      } catch (error) {
+        console.error(`❌ Ошибка удаления пользователя ${userId}:`, error)
+        
+        const user = getUserById(userId)
+        const userName = user ? `${user.last_name} ${user.first_name}` : `ID: ${userId}`
+        
+        let errorMsg = 'Неизвестная ошибка'
+        if (error.response?.data?.error) {
+          errorMsg = error.response.data.error
+        } else if (error.message) {
+          errorMsg = error.message
+        }
+        
+        errors.push({
+          userId,
+          userName,
+          error: errorMsg
+        })
+      }
+    }
+
+    // 🔴 ДОБАВЛЯЕМ: Обновляем группы после массового удаления
+    setTimeout(async () => {
+      await loadGroups()
+    }, 500)
+    
+    // Очищаем выбор
+    selectedUsers.value = []
+    
+    // Показываем результат
+    let resultMessage = ''
+    
+    if (deleted > 0) {
+      resultMessage += `✅ Успешно удалено: ${deleted} пользователей\n\n`
+    }
+    
+    if (errors.length > 0) {
+      resultMessage += `❌ Ошибки (${errors.length}):\n`
+      
+      const errorDetails = errors
+        .map(e => {
+          const name = e.userName || `ID: ${e.userId}`
+          return `• ${name}: ${e.error}`
+        })
+        .join('\n')
+      
+      resultMessage += errorDetails
+    } else if (deleted === total) {
+      resultMessage = `✅ Все ${deleted} пользователей успешно удалены!`
+    }
+    
+    alert(resultMessage)
+    
+  } catch (error) {
+    console.error('❌ Критическая ошибка массового удаления:', error)
+    alert(`❌ Ошибка массового удаления: ${error.message}`)
+  } finally {
+    isBulkDeleting.value = false
+  }
+}
+
+// Получить пользователя по ID
+const getUserById = (userId) => {
+  return users.value.find(user => user.id === userId)
+}
+
+// Открыть модалку импорта
+const openImportModal = async () => {
+  showImportModal.value = true
+  importSearchTerm.value = ''
+  foundGroups.value = []
+  selectedImportGroup.value = null
+  
+  // Автоматически ищем группы при открытии
+  await searchGroupsFromUniversity()
+}
+
+// Закрыть модалку импорта
+const closeImportModal = () => {
+  showImportModal.value = false
+}
+
+// Поиск групп на портале университета
+// Поиск групп на портале университета
+const searchGroupsFromUniversity = async () => {
+  if (!importSearchTerm.value.trim()) {
+    foundGroups.value = []
+    return
+  }
+  
+  try {
+    isSearchingGroups.value = true
+    foundGroups.value = []
+    
+    console.log(`🔍 Ищем группы: "${importSearchTerm.value}"`)
+    const groups = await UniversityParserService.searchGroups(importSearchTerm.value)
+    
+    foundGroups.value = groups
+    
+    if (groups.length === 0) {
+      console.log('ℹ️ Группы не найдены')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка поиска групп:', error)
+    
+    // Показываем пользователю ошибку
+    alert(`Не удалось найти группы: ${error.message}`)
+    
+    foundGroups.value = []
+  } finally {
+    isSearchingGroups.value = false
+  }
+}
+
+// Выбрать группу для импорта
+const selectImportGroup = (group) => {
+  selectedImportGroup.value = group
+}
+
+// Импортировать выбранную группу
+const importSelectedGroup = async () => {
+  if (!selectedImportGroup.value) {
+    alert('Выберите группу для импорта')
+    return
+  }
+  
+  try {
+    // Создаем группу в нашей системе
+    const groupData = {
+      number: selectedImportGroup.value.number,
+      description: `Импортировано с портала НОВГУ. ${selectedImportGroup.value.direction} (${selectedImportGroup.value.profile}), ${selectedImportGroup.value.course} курс, ${selectedImportGroup.value.institute}, ${selectedImportGroup.value.form}`
+    }
+    
+    const createdGroup = await GroupsService.createGroup(groupData)
+    
+    // Добавляем группу в список
+    groups.value.push(createdGroup)
+    
+    // Создаем студентов из группы (опционально)
+    if (selectedImportGroup.value.students && selectedImportGroup.value.students.length > 0) {
+      await createStudentsFromGroup(selectedImportGroup.value.students, createdGroup.id)
+    }
+    
+    alert(`✅ Группа "${createdGroup.number}" успешно импортирована!`)
+    closeImportModal()
+    
+  } catch (error) {
+    console.error('Ошибка импорта группы:', error)
+    alert(`❌ Ошибка импорта: ${error.message}`)
+  }
+}
+
+// Создать студентов из импортированной группы
+const createStudentsFromGroup = async (students, groupId) => {
+  const createdUsers = []
+  
+  for (const student of students) {
+    try {
+      // Разделяем ФИО на части
+      const nameParts = student.full_name.split(' ')
+      const lastName = nameParts[0] || ''
+      const firstName = nameParts[1] || ''
+      const middleName = nameParts[2] || ''
+      
+      const userData = {
+        last_name: lastName,
+        first_name: firstName,
+        middle_name: middleName,
+        group_id: groupId
+      }
+      
+      const createdUser = await UsersService.createUser(userData)
+      createdUsers.push(createdUser)
+      
+    } catch (error) {
+      console.error(`Ошибка создания пользователя ${student.full_name}:`, error)
+    }
+  }
+  
+  // Перезагружаем пользователей
+  if (createdUsers.length > 0) {
+    await loadUsers()
+  }
+  
+  return createdUsers
+}
+
+watch([searchQuery, selectedFilterGroupId, selectedStatus], () => {
+  // Очищаем выбор, если пользователей больше нет в отфильтрованном списке
+  selectedUsers.value = selectedUsers.value.filter(userId => 
+    filteredUsers.value.some(user => user.id === userId)
+  )
+})
 
 // Загрузка при монтировании
 onMounted(() => {
@@ -1544,6 +2093,196 @@ onMounted(() => {
 
 .fw-bold {
   font-weight: 700 !important;
+}
+
+.selected-row {
+  background-color: #f0f9ff;
+}
+
+.selected-row:hover {
+  background-color: #e0f2fe;
+}
+
+.selection-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.table-footer {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background-color: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.selection-info {
+  color: #374151;
+  font-size: 0.9rem;
+}
+
+.users-count {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+/* Стили для чекбоксов */
+.users-table th input[type="checkbox"],
+.users-table td input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.users-table th input[type="checkbox"]:disabled,
+.users-table td input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Стили для импорта групп */
+.btn-success {
+  background-color: #28a745;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: #218838;
+}
+
+.modal-wide {
+  width: 700px;
+  max-width: 95vw;
+}
+
+.import-container {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.search-input-with-button {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.search-input-full {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.hint {
+  color: #666;
+  font-size: 0.85rem;
+  display: block;
+  margin-top: 5px;
+}
+
+.groups-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin: 15px 0;
+}
+
+.group-item {
+  padding: 12px 15px;
+  border-bottom: 1px solid #f3f4f6;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.group-item:hover {
+  background-color: #f8f9fa;
+}
+
+.group-item.selected {
+  background-color: #e8f5e8;
+  border-left: 3px solid #28a745;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.group-number {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-number strong {
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.badge {
+  background-color: #6c757d;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.group-select-indicator input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.group-details {
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.group-details .detail {
+  margin-bottom: 4px;
+}
+
+.group-details strong {
+  color: #444;
+  min-width: 120px;
+  display: inline-block;
+}
+
+.no-results {
+  text-align: center;
+  padding: 30px;
+  color: #666;
+  font-style: italic;
+}
+
+.selected-group-info {
+  margin: 15px 0;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.alert {
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+
+.alert-info {
+  background-color: #d1ecf1;
+  border: 1px solid #bee5eb;
+  color: #0c5460;
+}
+
+.alert-info strong {
+  color: #0c5460;
 }
 
 /* Адаптивность */
