@@ -78,6 +78,9 @@
           <button class="add-button" @click="addUser">
             + Добавить участника
           </button>
+          <button class="add-group-button" @click="addGroupUsers">
+            + Добавить группу
+          </button>
           <!-- Кнопка генерации мест -->
             <div class="generate-seats-wrapper" v-if="hasParticipants">
             <button 
@@ -413,6 +416,12 @@
         :event-id="eventId"
         @user-added="handleUserAdded"
     />
+    <MassAddUsersModal
+      :show="showMassAddUsersModal"
+      @close="showMassAddUsersModal = false"
+      :event-id="eventId"
+      @users-added="handleMassUsersAdded"
+    />
     <EditUserModal
         v-if="selectedUser"
         :show="showEditUserModal"
@@ -438,10 +447,13 @@ import { EventsService } from '@/services/eventsService'
 import SimpleAddUserModal from '@/components/SimpleAddUserModal.vue'
 import EditUserModal from '@/components/EditUserModal.vue'
 import CreateModuleModal from '@/components/CreateModuleModal.vue'
+import MassAddUsersModal from '@/components/MassAddUsersModal.vue'
 
 const route = useRoute()
 const router = useRouter()
 const eventId = route.params.id
+
+
 
 // Данные мероприятия
 const event = ref(null)
@@ -466,9 +478,26 @@ const allStatuses = ref([]) // список всех статусов для с�
 const showEditUserModal = ref(false)
 const selectedUser = ref(null)
 
+const showMassAddUsersModal = ref(false)
+
 const hasAccounts = computed(() => {
   return users.value.some(user => user.login)
 })
+
+const addGroupUsers = () => {
+  console.log('🟢 Открываем модалку добавления группы')
+  showMassAddUsersModal.value = true
+}
+
+const handleMassUsersAdded = async (result) => {
+  console.log('✅ Пользователи добавлены массово:', result)
+  
+  // Перезагружаем пользователей
+  await loadUsers()
+  
+  // Показываем уведомление
+  alert(`✅ Успешно добавлено ${result.count} пользователей из группы!`)
+}
 
 const handleKeydown = (e) => {
   if (e.key === 'Escape' && showEditModal.value) {
@@ -2515,6 +2544,39 @@ onMounted(async () => {
   border-top: 2px solid white;
   border-radius: 50%;
   animation: button-spinner 0.8s linear infinite;
+}
+
+.add-group-button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 10px;
+  transition: background-color 0.3s;
+}
+
+.add-group-button:hover {
+  background-color: #45a049;
+}
+
+.add-group-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+/* Можно добавить иконку для кнопки */
+.add-group-button::before {
+  content: "👥 ";
+}
+
+/* Для лучшего визуального разделения кнопок */
+.users-header-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 @keyframes button-spinner {

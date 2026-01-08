@@ -348,6 +348,179 @@ async dropAllDatabases(moduleId) {
       throw new Error(error.response?.data?.message || 'Ошибка удаления БД')
     }
   }
+
+/**
+ * Управление всем модулем (статус модуля + все ресурсы)
+ */
+async toggleAllModuleResources(moduleId, shouldBeActive) {
+  try {
+    console.log(`🔄 Управление всем модулем ${moduleId}:`, 
+                shouldBeActive ? 'активация' : 'отключение');
+    
+    // Получаем БД модуля
+    console.log('📋 Получаем список БД модуля...');
+    const dbsResponse = await this.getModuleDatabases(moduleId);
+    
+    // Проверяем формат ответа
+    let databases = [];
+    if (Array.isArray(dbsResponse)) {
+      databases = dbsResponse;
+    } else if (dbsResponse && Array.isArray(dbsResponse.data)) {
+      databases = dbsResponse.data;
+    } else if (dbsResponse && dbsResponse.data) {
+      databases = [dbsResponse.data];
+    } else {
+      databases = [];
+    }
+    
+    console.log(`📊 Найдено БД: ${databases.length}`);
+    
+    // Если нужно заблокировать (отключить модуль)
+    if (!shouldBeActive) {
+      console.log('🔒 Начинаем блокировку модуля...');
+      
+      // 1. Блокируем все БД
+      const lockPromises = [];
+      let activeDbs = 0;
+      
+      databases.forEach(db => {
+        // Проверяем, активна ли БД
+        const isDbActive = db.is_active === true || db.is_active === 1 || db.is_active === '1';
+        if (isDbActive) {
+          activeDbs++;
+          lockPromises.push(
+            this.toggleDatabaseLock(db.id, 'lock', 'Отключение модуля')
+          );
+        }
+      });
+      
+      console.log(`🔒 Будет заблокировано БД: ${activeDbs}`);
+      
+      // 2. Блокируем все репозитории
+      console.log('🔒 Блокируем все репозитории...');
+      const { RepositoryService } = await import('@/services/gogsService');
+      let repoResult = { data: { updated: 0, failed: 0, total: 0 } };
+      
+      try {
+        repoResult = await RepositoryService.bulkToggleRepositories(moduleId, false);
+        console.log('✅ Репозитории заблокированы:', repoResult);
+      } catch (repoError) {
+        console.error('❌ Ошибка блокировки репозиториев:', repoError);
+      }
+      
+      // 3. Блокируем БД (если есть активные)
+      let dbResults = [];
+      if (lockPromises.length > 0) {
+        try {
+          dbResults = await Promise.allSettled(lockPromises);
+          console.log('✅ БД заблокированы:', dbResults);
+        } catch (dbError) {
+          console.error('❌ Ошибка блокировки БД:', dbError);
+        }
+      }
+      
+      // 4. Обновляем статус модуля
+      console.log('📝 Обновляем статус модуля...');
+      const { EventsService } = await import('@/services/eventsService');
+      try {
+        await EventsService.updateModule(moduleId, {
+          status_id: 6 // ID статуса "Отключен" - замените на ваш
+        });
+        console.log('✅ Статус модуля обновлен');
+      } catch (statusError) {
+        console.error('❌ Ошибка обновления статуса модуля:', statusError);
+      }
+      
+      return {
+        success: true,
+        message: 'Модуль отключен. Все ресурсы заблокированы.',
+        data: {
+          databases: {
+            total: databases.length,
+            active: activeDbs,
+            locked: dbResults.filter(r => r.status === 'fulfilled' && r.value?.success).length,
+            errors: dbResults.filter(r => r.status === 'rejected').length
+          },
+          repositories: repoResult.data || repoResult
+        }
+      };
+    }
+    // Если нужно разблокировать (активировать модуль)
+    else {
+      console.log('🔓 Начинаем активацию модуля...');
+      
+      // 1. Разблокируем все БД
+      const unlockPromises = [];
+      let inactiveDbs = 0;
+      
+      databases.forEach(db => {
+        // Проверяем, неактивна ли БД
+        const isDbInactive = db.is_active === false || db.is_active === 0 || db.is_active === '0';
+        if (isDbInactive) {
+          inactiveDbs++;
+          unlockPromises.push(
+            this.toggleDatabaseLock(db.id, 'unlock', 'Активация модуля')
+          );
+        }
+      });
+      
+      console.log(`🔓 Будет разблокировано БД: ${inactiveDbs}`);
+      
+      // 2. Разблокируем все репозитории
+      console.log('🔓 Разблокируем все репозитории...');
+      const { RepositoryService } = await import('@/services/gogsService');
+      let repoResult = { data: { updated: 0, failed: 0, total: 0 } };
+      
+      try {
+        repoResult = await RepositoryService.bulkToggleRepositories(moduleId, true);
+        console.log('✅ Репозитории разблокированы:', repoResult);
+      } catch (repoError) {
+        console.error('❌ Ошибка разблокировки репозиториев:', repoError);
+      }
+      
+      // 3. Разблокируем БД (если есть неактивные)
+      let dbResults = [];
+      if (unlockPromises.length > 0) {
+        try {
+          dbResults = await Promise.allSettled(unlockPromises);
+          console.log('✅ БД разблокированы:', dbResults);
+        } catch (dbError) {
+          console.error('❌ Ошибка разблокировки БД:', dbError);
+        }
+      }
+      
+      // 4. Обновляем статус модуля
+      console.log('📝 Обновляем статус модуля...');
+      const { EventsService } = await import('@/services/eventsService');
+      try {
+        await EventsService.updateModule(moduleId, {
+          status_id: 2 // ID статуса "Активен" - замените на ваш
+        });
+        console.log('✅ Статус модуля обновлен');
+      } catch (statusError) {
+        console.error('❌ Ошибка обновления статуса модуля:', statusError);
+      }
+      
+      return {
+        success: true,
+        message: 'Модуль активирован. Все ресурсы разблокированы.',
+        data: {
+          databases: {
+            total: databases.length,
+            inactive: inactiveDbs,
+            unlocked: dbResults.filter(r => r.status === 'fulfilled' && r.value?.success).length,
+            errors: dbResults.filter(r => r.status === 'rejected').length
+          },
+          repositories: repoResult.data || repoResult
+        }
+      };
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка управления модулем:', error);
+    throw new Error(error.response?.data?.message || 'Ошибка управления модулем');
+  }
+}
 }
 
 export default new DatabaseService()

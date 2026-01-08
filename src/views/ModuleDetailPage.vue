@@ -26,6 +26,44 @@
         </div>
       </div>
       
+      <div class="module-status-management" v-if="module">
+        <button 
+          v-if="module.status_id === 6"
+          @click="activateEntireModule"
+          class="action-btn activate-module-btn"
+          :disabled="togglingEntireModule"
+          title="Активировать модуль (разблокировать все БД и репозитории)"
+        >
+          <span v-if="togglingEntireModule">
+            <span class="loading-dots">
+              <span></span><span></span><span></span>
+            </span>
+            Активация...
+          </span>
+          <span v-else>
+            🚀 Активировать модуль
+          </span>
+        </button>
+        
+        <button 
+          v-else
+          @click="deactivateEntireModule"
+          class="action-btn deactivate-module-btn"
+          :disabled="togglingEntireModule"
+          title="Отключить модуль (заблокировать все БД и репозитории)"
+        >
+          <span v-if="togglingEntireModule">
+            <span class="loading-dots">
+              <span></span><span></span><span></span>
+            </span>
+            Отключение...
+          </span>
+          <span v-else>
+            ⛔ Отключить модуль
+          </span>
+        </button>
+      </div>
+      
       <!-- Информационная панель -->
       <div class="info-panel">
         <div class="info-card">
@@ -85,12 +123,8 @@
         >
           💾 Репозитории
         </button>
-        <button 
-          @click="activeTab = 'servers'" 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'servers' }"
-        >
-          🖥️ Серверы
+        <button @click="handleTabChange('experts')" class="tab-btn" :class="{ active: activeTab === 'experts' }">
+          👨‍🏫 Эксперты
         </button>
         <button 
           @click="activeTab = 'settings'" 
@@ -364,12 +398,13 @@
                 <!-- Кнопка блокировки/разблокировки -->
                 <button 
                   @click="toggleDatabaseLock(db)"
-                  class="action-btn small-btn lock-btn"
-                  :title="db.is_active ? 'Заблокировать БД (только чтение)' : 'Разблокировать БД'"
+                  class="action-btn-enhanced"
+                  :class="db.is_active ? 'lock-btn' : 'unlock-btn'"
                   :disabled="lockingDatabase"
+                  :title="db.is_active ? 'Заблокировать БД (только чтение)' : 'Разблокировать БД'"
                 >
-                  <span v-if="db.is_active">🔒</span>
-                  <span v-else>🔓</span>
+                  <span v-if="lockingDatabase">⏳</span>
+                  <span v-else>{{ db.is_active ? '🔒' : '🔓' }}</span>
                 </button>
                 <div class="action-buttons">
                   <!-- Кнопка пересоздать -->
@@ -395,16 +430,6 @@
           </tbody>
         </table>
       </div>
-      
-      <!-- Подсказки -->
-      <!-- <div class="table-footer" style="margin-top: 1.5rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border: 1px solid #bae6fd;">
-        <p style="margin: 0.5rem 0; color: #0369a1; font-size: 0.9rem;">
-         <strong>Реальные базы данных PostgreSQL:</strong> Каждый участник получает свою изолированную базу данных
-        </p>
-        <p style="margin: 0.5rem 0; color: #0369a1; font-size: 0.9rem;">
-          Для подключения используйте: <code>psql -h localhost -p 5432 -U username -d dbname</code>
-        </p>
-      </div> -->
     </div>
   </div>
 
@@ -412,6 +437,39 @@
         <div v-else-if="activeTab === 'repositories'" class="repositories-tab">
   <div class="section-header">
     <h3>Репозитории Git участников</h3>
+    <!-- Кнопки массового управления -->
+  <div class="bulk-management" v-if="repositories.length > 0">
+    <div class="bulk-buttons">
+      <button 
+        @click="lockAllRepositories"
+        class="action-btn lock-all-btn"
+        :disabled="bulkActionInProgress || !hasActiveRepositories"
+        title="Заблокировать ВСЕ репозитории (только чтение)"
+      >
+        <span v-if="bulkActionInProgress && bulkActionType === 'lock'">⏳</span>
+        <span v-else>🔒 Заблокировать все</span>
+      </button>
+      
+      <button 
+        @click="unlockAllRepositories"
+        class="action-btn unlock-all-btn"
+        :disabled="bulkActionInProgress || !hasLockedRepositories"
+        title="Разблокировать ВСЕ репозитории"
+      >
+        <span v-if="bulkActionInProgress && bulkActionType === 'unlock'">⏳</span>
+        <span v-else>🔓 Разблокировать все</span>
+      </button>
+      
+      <div class="bulk-stats">
+        <span class="stat-badge active">
+          ✅ Активных: {{ activeRepositoriesCount }}
+        </span>
+        <span class="stat-badge locked">
+          🔒 Заблокированных: {{ lockedRepositoriesCount }}
+        </span>
+      </div>
+    </div>
+  </div>
     <div class="bulk-actions">
       <button 
         @click="testGogsConnection" 
@@ -423,13 +481,62 @@
       </button>
       
       <button 
-        @click="createAllRepositories" 
-        class="action-btn create-btn"
-        :disabled="creatingRepositories || !gogsConnected"
-      >
-        <span v-if="creatingRepositories">⏳ Создание...</span>
-        <span v-else>Создать все репозитории</span>
-      </button>
+          @click="smartCreateOrRecreateRepositories" 
+          class="action-btn smart-btn"
+          :disabled="smartActionInProgress || !gogsConnected"
+          :class="{
+            'create-btn': repositories.length === 0,
+            'recreate-btn': repositories.length > 0
+          }"
+          :title="repositories.length === 0 ? 'Создать репозитории' : 'Пересоздать репозитории (удалить старые)'"
+        >
+          <span v-if="smartActionInProgress">⏳ Обработка...</span>
+          <span v-else>
+            {{ repositories.length === 0 ? '🚀 Создать все репозитории' : '🔄 Пересоздать все репозитории' }}
+          </span>
+        </button>
+        
+        <!-- Создание ОДНОГО репозитория -->
+        <div class="single-repo-create">
+          <select 
+            v-model="selectedParticipantForRepo" 
+            class="participant-select"
+            :disabled="creatingSingleRepo || !gogsConnected"
+          >
+            <option value="">Выберите участника...</option>
+            <option 
+              v-for="participant in availableParticipantsForRepo" 
+              :key="participant.id" 
+              :value="participant.id"
+            >
+              {{ participant.name }}
+              <span v-if="participant.seat_number">(Место {{ participant.seat_number }})</span>
+              <span v-if="participant.hasRepo" style="color: #10b981;">✓ Есть репозиторий</span>
+            </option>
+          </select>
+          
+          <button 
+            @click="createOrRecreateSingleRepository"
+            class="action-btn single-create-btn"
+            :disabled="!selectedParticipantForRepo || creatingSingleRepo || !gogsConnected"
+            :title="selectedParticipantForRepo && getParticipantRepoStatus(selectedParticipantForRepo) === 'has_repo' ? 'Пересоздать репозиторий' : 'Создать репозиторий'"
+          >
+            <span v-if="creatingSingleRepo">⏳</span>
+            <span v-else>
+              {{ selectedParticipantForRepo && getParticipantRepoStatus(selectedParticipantForRepo) === 'has_repo' ? '🔄 Пересоздать' : '➕ Создать' }}
+            </span>
+          </button>
+
+        </div>
+        <button 
+          @click="deleteAllRepositories" 
+          class="action-btn danger-btn delete-all-btn"
+          :disabled="deletingAllRepositories || repositories.length === 0 || !gogsConnected"
+          title="Удалить ВСЕ репозитории и пользователей из Gogs"
+        >
+          <span v-if="deletingAllRepositories">⏳ Удаление...</span>
+          <span v-else>🗑️ Удалить все</span>
+        </button>
     </div>
   </div>
 
@@ -569,9 +676,6 @@
                   📋 HTTP ссылка
                 </button>
               </div>
-              <small class="links-hint" v-if="repo.mock">
-                🎭 Демо-режим: ссылки не действительны
-              </small>
             </td>
             <td class="actions-cell-enhanced">
               <div class="actions-group-enhanced">
@@ -591,6 +695,15 @@
                   📂
                 </button>
                 <button 
+                  @click="recreateSingleRepository(repo)"
+                  class="action-btn-enhanced recreate-btn"
+                  :disabled="recreatingSingleRepo === repo.id"
+                  :title="recreatingSingleRepo === repo.id ? 'Пересоздание...' : 'Удалить и создать заново'"
+                >
+                  <span v-if="recreatingSingleRepo === repo.id">⏳</span>
+                  <span v-else>🔄</span>
+                </button>
+                <button 
                   @click="deleteRepository(repo)"
                   class="action-btn-enhanced delete-btn"
                   title="Удалить репозиторий"
@@ -608,23 +721,163 @@
   </div>
 </div>
 
-        <!-- Вкладка "Серверы" -->
-        <div v-else-if="activeTab === 'servers'" class="resource-tab">
-          <div class="section-header">
-            <h3>Серверы модуля</h3>
-            <button class="add-resource-btn" @click="addServer">
-              + Добавить сервер
-            </button>
-          </div>
-          <div class="empty-state">
-            <div class="empty-icon">🖥️</div>
-            <p>Серверы еще не добавлены</p>
-            <p class="empty-hint">Настройте серверы для работы модуля</p>
-            <button class="primary-btn" @click="addServer">
-              Добавить сервер
-            </button>
+        <div v-if="activeTab === 'experts'" class="experts-tab">
+      <div class="section-header">
+        <h3>👨‍🏫 Управление экспертами и публичными репозиториями</h3>
+        <div class="expert-actions">          
+          <button 
+            @click="createExpertAccounts" 
+            class="action-btn create-expert-btn"
+            :disabled="creatingExpertAccounts || !gogsConnected"
+          >
+            <span v-if="creatingExpertAccounts">⏳</span>
+            <span v-else>👨‍🏫 Создать учетные записи экспертов</span>
+          </button>
+          
+          <button 
+            @click="createPublicRepository" 
+            class="action-btn public-repo-btn"
+            :disabled="creatingPublicRepo || !gogsConnected"
+          >
+            <span v-if="creatingPublicRepo">⏳</span>
+            <span v-else>🌐 Создать публичный репозиторий</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Список экспертов -->
+      <div class="experts-section">
+        <div v-if="expertsLoading" class="loading">
+          <div class="spinner"></div>
+          <p>Загрузка экспертов...</p>
+        </div>
+        
+        <div v-else-if="expertsError" class="error">
+          <p>❌ {{ expertsError }}</p>
+          <button @click="loadModuleExperts">Повторить</button>
+        </div>
+        
+        <!-- Важная проверка: experts должен быть массивом -->
+        <div v-else-if="Array.isArray(experts) && experts.length > 0" class="experts-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Имя</th>
+                <th>Роль</th>
+                <th>Логин Gogs</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Проверяем, что expert существует в итерации -->
+              <tr v-for="expert in experts" :key="expert.id">
+                <td>{{ expert?.name || 'Неизвестно' }}</td>
+                <td>{{ expert?.role || 'Эксперт' }}</td>
+                <td>
+                  <span v-if="expert.has_gogs_account" class="badge success">
+                    ✅ {{ expert.login }}
+                  </span>
+                  <span v-else class="badge warning">
+                    ❌ Нет учетной записи
+                  </span>
+                </td>
+                <td>
+                  <!-- Добавьте проверку expert.has_gogs_account -->
+                  <button 
+                    v-if="expert.has_gogs_account"
+                    @click="recreateExpertAccount(expert)"
+                    class="action-btn small-btn"
+                    title="Пересоздать учетную запись"
+                  >
+                    🔄
+                  </button>
+                  <span v-else title="Учетной записи нет">
+                    —
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div v-else class="empty">
+          <p>👨‍🏫 Эксперты не найдены</p>
+          <button @click="loadModuleExperts" class="refresh-btn">
+            🔄 Обновить
+          </button>
+        </div>
+      </div>
+      
+      <!-- Публичный репозиторий -->
+      <div class="public-repo-section">
+        <h4>🌐 Публичный репозиторий</h4>
+        
+        <div v-if="publicRepoLoading" class="loading">
+          <div class="spinner"></div>
+          <p>Проверка публичного репозитория...</p>
+        </div>
+        
+        <div v-else-if="publicRepoError" class="error">
+          <p>❌ {{ publicRepoError }}</p>
+          <button @click="loadPublicRepository" class="retry-btn">
+            Повторить
+          </button>
+        </div>
+        
+        <!-- Отображаем только если репозиторий НЕ null -->
+        <div v-else-if="publicRepository" class="public-repo-info">
+          <div class="repo-card">
+            <div class="repo-header">
+              <h5>{{ publicRepository.name }}</h5>
+              <span class="public-badge">🌐 Публичный</span>
+            </div>
+            
+            <div class="repo-description">
+              {{ publicRepository.description }}
+            </div>
+            
+            <div v-if="publicRepository.owner" class="repo-owner">
+              <small>Владелец: {{ publicRepository.owner.name }} ({{ publicRepository.owner.role }})</small>
+            </div>
+            
+            <div class="repo-links">
+              <a 
+                :href="publicRepository.url" 
+                target="_blank" 
+                class="link-btn"
+              >
+                🌐 Открыть в Gogs
+              </a>
+              <button 
+                @click="copyToClipboard(publicRepository.clone_url)"
+                class="link-btn"
+              >
+                📋 Копировать ссылку
+              </button>
+            </div>
+            
+            <div class="repo-meta">
+              <small>Доступен: Всем участникам и экспертам</small>
+              <small>Права: Только эксперты могут вносить изменения</small>
+            </div>
           </div>
         </div>
+        
+        <!-- Отображаем если репозиторий null (не создан) -->
+        <div v-else class="empty">
+          <div class="empty-icon">📁</div>
+          <p>Публичный репозиторий еще не создан</p>
+          <p class="empty-hint">Создайте публичный репозиторий для общих материалов модуля</p>
+          <button 
+            @click="createPublicRepository" 
+            class="primary-btn"
+            :disabled="!gogsConnected"
+          >
+            🚀 Создать публичный репозиторий
+          </button>
+        </div>
+      </div>
+    </div>
 
         <!-- Вкладка "Настройки" -->
         <div v-else-if="activeTab === 'settings'" class="settings-tab">
@@ -740,11 +993,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { EventsService } from '@/services/eventsService'
 import { RepositoryService } from '@/services/gogsService'
 import DatabaseService from '@/services/databaseService'
+import { ExpertService } from '@/services/expertService'
 
 const route = useRoute()
 const router = useRouter()
@@ -758,7 +1012,19 @@ const singleDatabaseError = ref('')
 const recreatingDatabase = ref(false)
 const recreatingAllDatabases = ref(false)
 const droppingAllDatabases = ref(false)
-
+const selectedParticipantForRepo = ref('')
+const availableParticipantsForRepo = ref([])
+const creatingSingleRepo = ref(false)
+const deletingAllRepositories = ref(false)
+const recreatingSingleRepo = ref(null)
+const expertsLoading = ref(false)
+const experts = ref([])
+const expertsError = ref('')
+const creatingExpertAccounts = ref(false)
+const creatingPublicRepo = ref(false)
+const publicRepository = ref(null)
+const publicRepoLoading = ref(false)
+const publicRepoError = ref('')
 
 // Данные модуля
 const module = ref(null)
@@ -793,6 +1059,27 @@ const creatingDatabases = ref(false) // ← ДОБАВЬТЕ ЭТО
 const visiblePasswords = ref({})
 const lockingDatabase = ref(false)
 
+const smartActionInProgress = ref(false)
+
+// Переменные состояния
+const bulkActionInProgress = ref(false)
+const bulkActionType = ref('') // 'lock' или 'unlock'
+const togglingRepository = ref(null)
+
+// Вычисляемые свойства
+
+const lockedRepositoriesCount = computed(() => {
+  return repositories.value.filter(r => !r.is_active).length
+})
+
+const hasActiveRepositories = computed(() => {
+  return repositories.value.some(r => r.is_active)
+})
+
+const hasLockedRepositories = computed(() => {
+  return repositories.value.some(r => !r.is_active)
+})
+
 const isEditFormValid = computed(() => {
   return editModuleData.value.name.trim() !== '' &&
          editModuleData.value.status_id !== ''
@@ -811,6 +1098,13 @@ const handleTabChange = async (tabName) => {
   
   if (tabName === 'repositories') {
     loadRepositories()
+  }
+
+  if (tabName === 'experts') {
+    await Promise.all([
+      loadModuleExperts(),
+      loadPublicRepository()
+    ])
   }
 }
 
@@ -926,7 +1220,7 @@ const createSingleDatabase = async () => {
                       result.password || 
                       '(скрыто)'
       
-      alert(`✅ БД успешно создана для ${participant.name}\n\n` +
+      alert(`БД успешно создана для ${participant.name}\n\n` +
             `Название: ${dbName}\n` +
             `Пользователь: ${username}\n` +
             `Пароль: ${password.length > 0 ? '********' : 'не установлен'}\n\n` +
@@ -1028,6 +1322,21 @@ const loadModuleStatuses = async () => {
   }
 }
 
+const loadModuleExperts = async () => {
+  try {
+    expertsLoading.value = true  // ← используйте правильное имя
+    expertsError.value = ''
+    
+    experts.value = await ExpertService.getModuleExperts(moduleId)
+    
+  } catch (error) {
+    console.error('❌ Ошибка загрузки экспертов:', error)
+    expertsError.value = error.message || 'Не удалось загрузить экспертов'
+  } finally {
+    expertsLoading.value = false  // ← используйте правильное имя
+  }
+}
+
 const goBack = () => {
   if (module.value?.event_id) {
     router.push(`/events/${module.value.event_id}`)
@@ -1110,6 +1419,102 @@ const testConnectionDirectly = async () => {
   } catch (error) {
     console.error('🔥 Критическая ошибка:', error)
     alert(`🔥 Ошибка подключения:\n${error.message}\n\nПроверьте:\n1. Сервер Laravel запущен\n2. Адрес правильный\n3. Нет блокировки брандмауэром`)
+  }
+}
+
+// Умная функция: создает или пересоздает
+const smartCreateOrRecreateRepositories = async () => {
+  const hasRepositories = repositories.value.length > 0
+  
+  if (hasRepositories) {
+    if (!confirm(`🔄 ПЕРЕСОЗДАТЬ ВСЕ ${repositories.value.length} РЕПОЗИТОРИЕВ?\n\n⚠️ Это удалит все существующие репозитории и создаст новые!\n⚠️ Данные в репозиториях будут потеряны!\n⚠️ Действие необратимо!`)) {
+      return
+    }
+  } else {
+    if (!confirm(`🚀 СОЗДАТЬ РЕПОЗИТОРИИ ДЛЯ ВСЕХ УЧАСТНИКОВ?`)) {
+      return
+    }
+  }
+  
+  try {
+    smartActionInProgress.value = true
+    
+    console.log('🔄 Отправляем запрос на умное действие...', {
+      moduleId,
+      recreate: hasRepositories,
+      currentRepositories: repositories.value.length
+    })
+    
+    const result = await RepositoryService.smartRepositoriesAction(moduleId, hasRepositories)
+    
+    console.log('📊 Детальный результат:', result)
+    
+    // Формируем детальное сообщение
+    let message = `✅ ${result.message}\n\n`
+    message += `📊 Статистика:\n`
+    message += `   • Всего участников: ${result.data.total}\n`
+    message += `   • ✅ Успешно: ${result.data.successful}\n`
+    message += `   • ❌ Ошибок: ${result.data.failed}\n`
+    
+    if (result.data.deleted_count > 0) {
+      message += `   • 🗑️ Удалено старых: ${result.data.deleted_count}\n`
+    }
+    
+    // Показываем детали ошибок (первые 3)
+    if (result.data.failed > 0 && result.data.repositories) {
+      const errors = result.data.repositories.filter(r => !r.success)
+      if (errors.length > 0) {
+        message += `\n⚠️ Ошибки (первые 3):\n`
+        errors.slice(0, 3).forEach((error, index) => {
+          message += `   ${index + 1}. ${error.participant_name}: ${error.error}\n`
+        })
+        if (errors.length > 3) {
+          message += `   ... и еще ${errors.length - 3} ошибок\n`
+        }
+      }
+    }
+    
+    alert(message)
+    
+    // Перезагружаем список
+    await loadRepositories()
+    
+  } catch (error) {
+    console.error('🔥 Критическая ошибка:', error)
+    alert(`❌ Ошибка: ${error.message || 'Не удалось выполнить действие'}\n\nПроверьте консоль для деталей.`)
+  } finally {
+    smartActionInProgress.value = false
+  }
+}
+
+// Пересоздать один репозиторий
+const recreateSingleRepository = async (repo) => {
+  const participantName = repo.participant?.name || 'Участник'
+  
+  if (!confirm(`🔄 Пересоздать репозиторий для "${participantName}"?\n\n⚠️ Старый репозиторий будет удален!\n⚠️ Данные в репозитории будут потеряны!`)) {
+    return
+  }
+  
+  try {
+    recreatingSingleRepo.value = repo.id
+    
+    // Используем тот же метод, что и для выпадающего списка
+    const result = await RepositoryService.createOrRecreateSingleRepository(
+      moduleId, 
+      repo.participant?.id || repo.event_account_id,
+      true // recreate = true
+    )
+    
+    alert(`✅ Репозиторий успешно пересоздан!\n\nНазвание: ${result.data.repository_name}\nURL: ${result.data.repository_url}`)
+    
+    // Обновляем список репозиториев
+    await loadRepositories()
+    
+  } catch (error) {
+    console.error('❌ Ошибка пересоздания репозитория:', error)
+    alert(`❌ ${error.message || 'Не удалось пересоздать репозиторий'}`)
+  } finally {
+    recreatingSingleRepo.value = null
   }
 }
 
@@ -1305,23 +1710,6 @@ const safeDeleteAllDatabases = async () => {
   }
 }
 
-const toggleRepositoryAccess = async (repo) => {
-  const action = repo.is_active ? 'заблокировать' : 'разблокировать'
-  
-  if (!confirm(`${action} доступ к репозиторию "${repo.name}"?`)) {
-    return
-  }
-  
-  try {
-    await RepositoryService.updateRepositoryStatus(repo.id, !repo.is_active)
-    repo.is_active = !repo.is_active
-    repo.status = repo.is_active ? 'active' : 'disabled'
-    alert(`✅ Доступ ${action}`)
-  } catch (error) {
-    alert(`❌ ${error.message}`)
-  }
-}
-
 const copyPassword = (password) => {
   if (!password) {
     alert('Пароль недоступен')
@@ -1340,14 +1728,24 @@ const copyPassword = (password) => {
 }
 
 const deleteRepository = async (repo) => {
-  if (!confirm(`Удалить репозиторий "${repo.name}"?\n\nЭто действие нельзя отменить.`)) {
+  const participantName = repo.participant?.name || 'Участник'
+  
+  if (!confirm(`🗑️ Удалить репозиторий "${repo.name}" для участника ${participantName}?\n\n⚠️ Репозиторий будет удален из Gogs!\n⚠️ Пользователь будет удален из Gogs!\n⚠️ Действие необратимо!`)) {
     return
   }
   
   try {
-    await RepositoryService.deleteRepository(repo.id)
+    const result = await RepositoryService.deleteSingleRepository(
+      moduleId,
+      repo.id,
+      repo.participant?.id || repo.event_account_id
+    )
+    
+    alert(`✅ ${result.message || 'Репозиторий удален'}`)
+    
+    // Удаляем из локального списка
     repositories.value = repositories.value.filter(r => r.id !== repo.id)
-    alert('✅ Репозиторий удален')
+    
   } catch (error) {
     alert(`❌ ${error.message}`)
   }
@@ -1366,7 +1764,8 @@ const copyToClipboard = (text) => {
 const getStatusText = (status) => {
   const statusMap = {
     'active': '✅ Активен',
-    'disabled': '❌ Заблокирован', 
+    'locked': '🔒 Заблокирован',
+    'disabled': '❌ Отключен', 
     'pending': '⏳ Ожидает',
     'error': '⚠️ Ошибка'
   }
@@ -1737,6 +2136,134 @@ const lockAllDatabases = async () => {
   }
 }
 
+const lockAllRepositories = async () => {
+  const activeCount = activeRepositoriesCount.value
+  
+  if (activeCount === 0) {
+    alert('Нет активных репозиториев для блокировки')
+    return
+  }
+  
+  if (!confirm(`🔒 ЗАБЛОКИРОВАТЬ ВСЕ ${activeCount} РЕПОЗИТОРИЕВ?\n\n⚠️ Участники смогут только:\n• Просматривать код\n• Клонировать репозиторий\n\n❌ Не смогут:\n• Делать коммиты\n• Создавать ветки\n• Отправлять изменения\n\nДействие обратимо.`)) {
+    return
+  }
+  
+  try {
+    bulkActionInProgress.value = true
+    bulkActionType.value = 'lock'
+    
+    const result = await RepositoryService.bulkToggleRepositories(moduleId, false)
+    
+    let message = `✅ ${result.message}\n\n`
+    message += `📊 Статистика:\n`
+    message += `   • Всего репозиториев: ${result.data.total}\n`
+    message += `   • ✅ Заблокировано: ${result.data.updated}\n`
+    message += `   • ❌ Ошибок: ${result.data.failed}\n\n`
+    
+    if (result.data.failed > 0) {
+      message += `⚠️ Ошибки (первые 3):\n`
+      result.data.details
+        .filter(d => !d.success)
+        .slice(0, 3)
+        .forEach((error, i) => {
+          message += `   ${i + 1}. ${error.repository_name}: ${error.error}\n`
+        })
+    }
+    
+    alert(message)
+    
+    // Обновляем список
+    await loadRepositories()
+    
+  } catch (error) {
+    console.error('❌ Ошибка массовой блокировки:', error)
+    alert(`❌ ${error.message || 'Не удалось заблокировать репозитории'}`)
+  } finally {
+    bulkActionInProgress.value = false
+    bulkActionType.value = ''
+  }
+}
+
+const unlockAllRepositories = async () => {
+  const lockedCount = lockedRepositoriesCount.value
+  
+  if (lockedCount === 0) {
+    alert('Нет заблокированных репозиториев')
+    return
+  }
+  
+  if (!confirm(`🔓 РАЗБЛОКИРОВАТЬ ВСЕ ${lockedCount} РЕПОЗИТОРИЕВ?\n\n✅ Участники смогут:\n• Делать коммиты\n• Создавать ветки\n• Отправлять изменения\n\nДействие обратимо.`)) {
+    return
+  }
+  
+  try {
+    bulkActionInProgress.value = true
+    bulkActionType.value = 'unlock'
+    
+    const result = await RepositoryService.bulkToggleRepositories(moduleId, true)
+    
+    let message = `✅ ${result.message}\n\n`
+    message += `📊 Статистика:\n`
+    message += `   • Всего репозиториев: ${result.data.total}\n`
+    message += `   • ✅ Разблокировано: ${result.data.updated}\n`
+    message += `   • ❌ Ошибок: ${result.data.failed}\n`
+    
+    alert(message)
+    
+    // Обновляем список
+    await loadRepositories()
+    
+  } catch (error) {
+    console.error('❌ Ошибка массовой разблокировки:', error)
+    alert(`❌ ${error.message || 'Не удалось разблокировать репозитории'}`)
+  } finally {
+    bulkActionInProgress.value = false
+    bulkActionType.value = ''
+  }
+}
+
+// Обновленный метод для переключения одного репозитория
+const toggleRepositoryAccess = async (repo) => {
+  const action = repo.is_active ? 'заблокировать' : 'разблокировать'
+  const participantName = repo.participant?.name || 'Участник'
+  
+  const message = repo.is_active 
+    ? `🔒 Заблокировать репозиторий для "${participantName}"?\n\n⚠️ Участник сможет только:\n• Просматривать код\n• Клонировать репозиторий\n\n❌ Не сможет:\n• Делать коммиты\n• Создавать ветки\n• Отправлять изменения`
+    : `🔓 Разблокировать репозиторий для "${participantName}"?\n\n✅ Участник сможет:\n• Делать коммиты\n• Создавать ветки\n• Отправлять изменения`
+  
+  if (!confirm(message)) {
+    return
+  }
+  
+  try {
+    togglingRepository.value = repo.id
+    
+    const result = await RepositoryService.toggleRepository(
+      repo.id, 
+      !repo.is_active
+    )
+    
+    console.log('✅ Результат переключения:', result)
+    
+    if (result.success) {
+      // Обновляем локальные данные
+      repo.is_active = !repo.is_active
+      repo.status = repo.is_active ? 'active' : 'locked'
+      
+      const statusText = repo.is_active ? 'разблокирован' : 'заблокирован'
+      alert(`✅ Репозиторий ${statusText}`)
+    } else {
+      throw new Error(result.message || 'Ошибка переключения')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка переключения статуса:', error)
+    alert(`❌ ${error.message || 'Не удалось изменить статус'}`)
+  } finally {
+    togglingRepository.value = null
+  }
+}
+
 /**
  * Разблокировка всех БД
  */
@@ -1807,8 +2334,9 @@ const toggleDatabaseLock = async (database) => {
     if (result.success) {
       alert(`✅ ${result.message}`)
       
+      // Обновляем данные БД
       const updatedDb = await DatabaseService.getDatabase(database.id)
-      Object.assign(database, updatedDb)
+      Object.assign(database, updatedDb) // обновляем текущий объект
     }
     
   } catch (error) {
@@ -1817,6 +2345,500 @@ const toggleDatabaseLock = async (database) => {
   } finally {
     lockingDatabase.value = false
   }
+}
+
+// Загружаем участников для создания одного репозитория
+const loadParticipantsForSingleRepo = async () => {
+  try {
+    if (!module.value?.event_id) return
+    
+    // Получаем учетные записи мероприятия
+    const accounts = await EventsService.getEventAccounts(module.value.event_id, {
+      roles: 'Участник'
+    })
+    
+    // Получаем текущие репозитории
+    const currentRepos = repositories.value
+    
+    // Формируем список участников
+    availableParticipantsForRepo.value = accounts
+      .filter(account => account.user)
+      .map(account => {
+        const user = account.user
+        let fullName = ''
+        if (user.last_name || user.first_name || user.middle_name) {
+          fullName = `${user.last_name || ''} ${user.first_name || ''} ${user.middle_name || ''}`.trim()
+        } else {
+          fullName = user.name || user.login || 'Неизвестный'
+        }
+        
+        // Проверяем, есть ли уже репозиторий у этого участника
+        const hasRepo = currentRepos.some(repo => 
+          repo.event_account_id === account.id || 
+          repo.participant?.id === account.user_id
+        )
+        
+        return {
+          id: account.id,
+          name: fullName,
+          login: account.login,
+          seat_number: account.seat_number,
+          user_id: account.user_id,
+          hasRepo: hasRepo
+        }
+      })
+    
+  } catch (error) {
+    console.error('Ошибка загрузки участников:', error)
+  }
+}
+
+const recreateExpertAccount = async (expert) => {
+  if (!expert || !expert.id) {
+    alert('Данные эксперта не найдены')
+    return
+  }
+
+  if (!confirm(`🔄 Пересоздать учетную запись для эксперта "${expert.name}"?\n\nСтарая учетная запись будет удалена из Gogs!\nБудет создана новая с новым паролем.`)) {
+    return
+  }
+  
+  try {
+    const result = await ExpertService.recreateExpertAccount(moduleId, expert.id)
+    
+    alert(`✅ Учетная запись успешно пересоздана!\n\nЛогин: ${result.data.username}\nПароль: ${result.data.password}`)
+    
+    // Обновляем список экспертов
+    await loadModuleExperts()
+    
+  } catch (error) {
+    console.error('❌ Ошибка пересоздания учетной записи:', error)
+    alert(`❌ ${error.message || 'Не удалось пересоздать учетную запись'}`)
+  }
+}
+
+const openExpertGogs = (expert) => {
+  if (expert.has_gogs_account) {
+    window.open(`https://213441fe8ea4.vps.myjino.ru`, '_blank');
+  }
+}
+
+// Проверка статуса репозитория участника
+const getParticipantRepoStatus = (participantId) => {
+  const participant = availableParticipantsForRepo.value.find(p => p.id == participantId)
+  return participant?.hasRepo ? 'has_repo' : 'no_repo'
+}
+
+// Создание/пересоздание одного репозитория
+const createOrRecreateSingleRepository = async () => {
+  if (!selectedParticipantForRepo.value) return
+  
+  const participant = availableParticipantsForRepo.value.find(p => p.id == selectedParticipantForRepo.value)
+  if (!participant) return
+  
+  const hasRepo = participant.hasRepo
+  const action = hasRepo ? 'пересоздать' : 'создать'
+  const actionWarning = hasRepo 
+    ? '⚠️ Старый репозиторий будет удален!\n⚠️ Данные будут потеряны!'
+    : 'Будет создан новый приватный Git-репозиторий.'
+  
+  if (!confirm(`${hasRepo ? '🔄' : '🚀'} ${action.toUpperCase()} репозиторий для участника "${participant.name}"?\n\n${actionWarning}`)) {
+    return
+  }
+  
+  try {
+    creatingSingleRepo.value = true
+    
+    const result = await RepositoryService.createOrRecreateSingleRepository(
+      moduleId, 
+      participant.id,
+      hasRepo
+    )
+    
+    const successMessage = hasRepo 
+      ? `Репозиторий успешно пересоздан!\n\nНазвание: ${result.data.repository_name}\nURL: ${result.data.repository_url}`
+      : `Репозиторий успешно создан!\n\nНазвание: ${result.data.repository_name}\nURL: ${result.data.repository_url}`
+    
+    alert(successMessage)
+    
+    // Обновляем списки
+    await loadRepositories()
+    await loadParticipantsForSingleRepo()
+    
+    // Сбрасываем выбор
+    selectedParticipantForRepo.value = ''
+    
+  } catch (error) {
+    console.error('❌ Ошибка создания/пересоздания репозитория:', error)
+    alert(`❌ ${error.message || 'Не удалось выполнить действие'}`)
+  } finally {
+    creatingSingleRepo.value = false
+  }
+}
+
+// Метод удаления ВСЕХ репозиториев
+const deleteAllRepositories = async () => {
+  if (repositories.value.length === 0) {
+    alert('Нет репозиториев для удаления')
+    return
+  }
+  
+  const confirmationMessage = `
+⚠️ ⚠️ ⚠️  ОПАСНОЕ ДЕЙСТВИЕ  ⚠️ ⚠️ ⚠️
+
+Вы собираетесь удалить ВСЕ репозитории модуля:
+• Всего репозиториев: ${repositories.value.length}
+• Участников с репозиториями: ${new Set(repositories.value.map(r => r.participant?.id || r.event_account_id)).size}
+
+❗ ЭТО ДЕЙСТВИЕ НЕОБРАТИМО
+❗ Все репозитории будут УДАЛЕНЫ из Gogs
+❗ Все пользователи будут УДАЛЕНЫ из Gogs
+❗ Все записи будут УДАЛЕНЫ из базы данных
+
+Для подтверждения введите: "УДАЛИТЬ ${repositories.value.length} РЕПОЗИТОРИЕВ"
+  `.trim()
+  
+  const userInput = prompt(confirmationMessage)
+  
+  if (userInput === `УДАЛИТЬ ${repositories.value.length} РЕПОЗИТОРИЕВ`) {
+    await executeDeleteAllRepositories()
+  } else if (userInput !== null) {
+    alert('❌ Неправильный код подтверждения. Удаление отменено.')
+  }
+}
+
+// Выполнение удаления всех репозиториев
+const executeDeleteAllRepositories = async () => {
+  try {
+    deletingAllRepositories.value = true
+    
+    alert('🔄 Запущено удаление всех репозиториев. Пожалуйста, подождите...')
+    
+    const result = await RepositoryService.deleteAllRepositories(moduleId)
+    
+    if (result.success) {
+      let message = `✅ ${result.message}\n\n`
+      message += `📊 Статистика удаления:\n`
+      
+      if (result.data?.deletion) {
+        const d = result.data.deletion
+        message += `   • Всего найдено: ${d.total}\n`
+        message += `   • ✅ Удалено репозиториев: ${d.repositories_deleted}\n`
+        message += `   • ✅ Удалено пользователей: ${d.users_deleted}\n`
+        message += `   • ❌ Ошибок: ${d.errors}\n`
+      }
+      
+      if (result.data?.db_deleted) {
+        message += `   • 🗃️ Удалено записей из БД: ${result.data.db_deleted}\n`
+      }
+      
+      alert(message)
+      
+      // Очищаем локальный список
+      repositories.value = []
+      await loadParticipantsForSingleRepo()
+      
+    } else {
+      throw new Error(result.message || 'Ошибка удаления')
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка удаления всех репозиториев:', error)
+    alert(`❌ ${error.message || 'Не удалось удалить репозитории'}`)
+  } finally {
+    deletingAllRepositories.value = false
+  }
+}
+
+// В script setup добавьте:
+
+const togglingEntireModule = ref(false)
+
+const activateEntireModule = async () => {
+  if (!module.value) return
+  
+  const moduleName = module.value.name || 'модуль'
+  const dbCount = databases.value.length
+  const repoCount = repositories.value.length
+  
+  const message = `
+🚀 АКТИВИРОВАТЬ ВЕСЬ МОДУЛЬ "${moduleName}"?
+
+📊 Ресурсы модуля:
+• Базы данных: ${dbCount} шт.
+• Репозитории: ${repoCount} шт.
+
+✅ БУДУТ РАЗБЛОКИРОВАНЫ:
+• Все БД (полный доступ)
+• Все репозитории (запись и чтение)
+• Модуль станет активным
+
+Продолжить?
+`.trim()
+  
+  if (!confirm(message)) return
+  
+  try {
+    togglingEntireModule.value = true
+    
+    const result = await DatabaseService.toggleAllModuleResources(moduleId, true)
+    
+    // Обновляем все данные
+    await Promise.all([
+      loadModule(),
+      loadDatabases(),
+      loadRepositories()
+    ])
+    
+    // Показываем результат
+    let resultMessage = `✅ Модуль активирован!\n\n`
+    resultMessage += `📊 Результаты:\n`
+    resultMessage += `• БД разблокировано: ${result.data.databases.unlocked}/${result.data.databases.total}\n`
+    resultMessage += `• Ошибок при БД: ${result.data.databases.errors}\n`
+    resultMessage += `• Репозиториев разблокировано: ${result.data.repositories.updated || 0}\n`
+    resultMessage += `• Статус модуля: Активен ✅`
+    
+    alert(resultMessage)
+    
+  } catch (error) {
+    console.error('❌ Ошибка активации модуля:', error)
+    alert(`❌ ${error.message || 'Не удалось активировать модуль'}`)
+  } finally {
+    togglingEntireModule.value = false
+  }
+}
+
+const deactivateEntireModule = async () => {
+  if (!module.value) return
+  
+  const moduleName = module.value.name || 'модуль'
+  const dbCount = databases.value.length
+  const repoCount = repositories.value.length
+  
+  const message = `
+⛔ ОТКЛЮЧИТЬ ВЕСЬ МОДУЛЬ "${moduleName}"?
+
+📊 Ресурсы модуля:
+• Базы данных: ${dbCount} шт.
+• Репозитории: ${repoCount} шт.
+
+🔒 БУДУТ ЗАБЛОКИРОВАНЫ:
+• Все БД (только чтение)
+• Все репозитории (только чтение)
+• Модуль станет отключенным
+
+⚠️ ВНИМАНИЕ:
+• Участники не смогут вносить изменения
+• Доступ будет только для просмотра
+• Разблокировка потребует действий администратора
+
+Продолжить?
+`.trim()
+  
+  if (!confirm(message)) return
+  
+  try {
+    togglingEntireModule.value = true
+    
+    const result = await DatabaseService.toggleAllModuleResources(moduleId, false)
+    
+    // Обновляем все данные
+    await Promise.all([
+      loadModule(),
+      loadDatabases(),
+      loadRepositories()
+    ])
+    
+    // Показываем результат
+    let resultMessage = `✅ Модуль отключен!\n\n`
+    resultMessage += `📊 Результаты:\n`
+    resultMessage += `• БД заблокировано: ${result.data.databases.locked}/${result.data.databases.total}\n`
+    resultMessage += `• Ошибок при БД: ${result.data.databases.errors}\n`
+    resultMessage += `• Репозиториев заблокировано: ${result.data.repositories.updated || 0}\n`
+    resultMessage += `• Статус модуля: Отключен ⛔`
+    
+    alert(resultMessage)
+    
+  } catch (error) {
+    console.error('❌ Ошибка отключения модуля:', error)
+    alert(`❌ ${error.message || 'Не удалось отключить модуль'}`)
+  } finally {
+    togglingEntireModule.value = false
+  }
+}
+
+// Создать учетные записи экспертов
+
+const createExpertAccounts = async () => {
+  if (!confirm('Создать учетные записи в Gogs для всех экспертов модуля?\n\nЭксперты получат доступ ко всем репозиториям участников.')) {
+    return
+  }
+  
+  try {
+    creatingExpertAccounts.value = true
+    
+    const result = await ExpertService.createExpertAccounts(moduleId)
+    
+    let message = `✅ ${result.message}\n\n`
+    
+    if (result.data) {
+      message += `📊 Статистика:\n`
+      message += `   • Всего экспертов: ${result.data.total}\n`
+      message += `   • ✅ Успешно: ${result.data.successful}\n`
+      message += `   • ❌ Ошибок: ${result.data.failed}\n`
+    }
+    
+    alert(message)
+    
+    // Обновляем список
+    await loadModuleExperts()
+    
+  } catch (error) {
+    console.error('❌ Ошибка создания учетных записей экспертов:', error)
+    alert(`❌ ${error.message || 'Не удалось создать учетные записи'}`)
+  } finally {
+    creatingExpertAccounts.value = false
+  }
+}
+
+const createPublicRepository = async () => {
+  if (!confirm('Создать публичный репозиторий для модуля?\n\n📌 Все участники и эксперты смогут просматривать содержимое.\n👑 Только Главный и Технический эксперты смогут вносить изменения.\n✅ Доступ будет настроен автоматически для всех участников мероприятия.')) {
+    return
+  }
+  
+  try {
+    creatingPublicRepo.value = true
+    
+    // 1. Создаем публичный репозиторий
+    const result = await ExpertService.createPublicRepository(moduleId)
+    
+    console.log('📦 Результат создания публичного репозитория:', result)
+    
+    let message = `✅ ${result.message}\n\n`
+    message += `🔗 URL: ${result.data?.repository?.url || result.data?.clone_url}\n`
+    
+    // 2. Проверяем, настроен ли доступ автоматически
+    if (result.data?.access_configured) {
+      const accessResults = result.data.access_results
+      message += `\n👥 Автоматически настроен доступ для:\n`
+      
+      if (accessResults.by_role) {
+        Object.entries(accessResults.by_role).forEach(([roleId, roleData]) => {
+          if (roleData.successful > 0) {
+            message += `   • ${roleData.role_name}: ${roleData.successful} пользователей\n`
+          }
+        })
+      }
+      
+      message += `\n📊 Всего: ${accessResults.total_users} пользователей\n`
+      message += `✅ Администраторов: ${(accessResults.by_role?.[1]?.successful || 0) + (accessResults.by_role?.[3]?.successful || 0)}\n`
+      message += `👀 Наблюдателей: ${(accessResults.by_role?.[2]?.successful || 0) + (accessResults.by_role?.[4]?.successful || 0)}\n`
+    } else {
+      message += `\n⚠️ Доступ не настроен автоматически\n`
+      message += `Для настройки прав используйте кнопку "Настроить доступ" ниже.\n`
+    }
+    
+    alert(message)
+    
+    // 3. Загружаем обновленную информацию о публичном репозитории
+    await loadPublicRepository()
+    
+  } catch (error) {
+    console.error('❌ Ошибка создания публичного репозитория:', error)
+    
+    let errorMessage = error.message || 'Не удалось создать публичный репозиторий'
+    
+    // Проверяем, есть ли детали ошибки
+    if (error.response?.data?.errors) {
+      errorMessage += '\n\nДетали:\n'
+      error.response.data.errors.forEach((err, i) => {
+        errorMessage += `${i + 1}. ${err}\n`
+      })
+    }
+    
+    alert(`❌ ${errorMessage}`)
+  } finally {
+    creatingPublicRepo.value = false
+  }
+}
+
+async function handleCreatePublicRepository() {
+    try {
+        const result = await RepositoryService.createPublicRepository(moduleId)
+        
+        // Показать сообщение об успехе
+        alert(`✅ Публичный репозиторий создан!\n` +
+              `🔗 URL: ${result.data.repository.url}\n` +
+              (result.data.access_configured 
+                  ? `👥 Доступ настроен для ${result.data.access_results.total_users} пользователей`
+                  : '⚠️ Доступ не настроен (используется mock режим)'))
+        
+        // Обновить список репозиториев
+        loadPublicRepository()
+        
+    } catch (error) {
+        alert(`❌ Ошибка: ${error.response?.data?.message || error.message}`)
+    }
+}
+
+// Загрузить информацию о публичном репозитории
+const loadPublicRepository = async () => {
+  try {
+    publicRepoLoading.value = true
+    publicRepoError.value = ''
+    
+    const result = await ExpertService.getPublicRepository(moduleId)
+    
+    console.log('📦 Данные публичного репозитория:', result)
+    
+    // Проверяем разные форматы ответа
+    if (result && typeof result === 'object') {
+      // Если ответ содержит data
+      if (result.data) {
+        publicRepository.value = result.data
+      } 
+      // Если ответ уже содержит нужные поля
+      else if (result.name || result.url) {
+        publicRepository.value = result
+      }
+      // Если структура с success
+      else if (result.success && result.data) {
+        publicRepository.value = result.data
+      } 
+      else {
+        publicRepository.value = null
+      }
+    } else {
+      publicRepository.value = null
+    }
+    
+  } catch (error) {
+    // Проверяем, если это ошибка 404 (репозиторий не найден)
+    if (error.response?.status === 404 || error.message?.includes('404')) {
+      console.log('ℹ️ Публичный репозиторий еще не создан')
+      publicRepository.value = null
+      publicRepoError.value = ''
+    } else {
+      console.error('❌ Ошибка загрузки публичного репозитория:', error)
+      publicRepoError.value = error.message || 'Не удалось загрузить информацию'
+    }
+  } finally {
+    publicRepoLoading.value = false
+  }
+}
+
+// Вспомогательные функции
+const getExpertsByRole = (role) => {
+  return experts.value.filter(expert => expert.role === role)
+}
+
+const getRoleClass = (role) => {
+  const classes = {
+    'Главный эксперт': 'role-chief',
+    'Технический эксперт': 'role-tech',
+    'Эксперт': 'role-expert'
+  }
+  return classes[role] || 'role-unknown'
 }
 
 const formatDate = (dateString) => {
@@ -1833,6 +2855,18 @@ const formatDate = (dateString) => {
     return dateString
   }
 }
+
+// При загрузке репозиториев обновляем список участников
+watch(repositories, () => {
+  loadParticipantsForSingleRepo()
+})
+
+// При смене таба загружаем участников
+watch(activeTab, (newTab) => {
+  if (newTab === 'repositories') {
+    loadParticipantsForSingleRepo()
+  }
+})
 
 onMounted(async () => {
   await Promise.all([
@@ -1902,9 +2936,29 @@ onMounted(async () => {
 
 .bulk-actions {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
+}
+
+.delete-all-btn {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.3);
+}
+
+.delete-all-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(220, 38, 38, 0.4);
+}
+
+.delete-all-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .action-btn {
@@ -3042,22 +4096,44 @@ th {
   min-width: 140px;
 }
 
+/* Стили для кнопки пересоздания */
+.recreate-btn {
+  background: #f59e0b;
+  color: white;
+}
+
+.recreate-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.recreate-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
 .actions-group-enhanced {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
 }
 
 .action-btn-enhanced {
-  padding: 0.6rem;
-  width: 40px;
-  height: 40px;
-  justify-content: center;
-  border-radius: 8px;
+  padding: 6px 10px;
   border: none;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 14px;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+}
+
+.action-btn-enhanced:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .access-btn {
@@ -3976,6 +5052,100 @@ th {
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
 }
 
+.bulk-management {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.bulk-buttons {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.lock-all-btn {
+  background-color: #ef4444;
+  color: white;
+  border: none;
+}
+
+.lock-all-btn:hover:not(:disabled) {
+  background-color: #dc2626;
+}
+
+.unlock-all-btn {
+  background-color: #10b981;
+  color: white;
+  border: none;
+}
+
+.unlock-all-btn:hover:not(:disabled) {
+  background-color: #059669;
+}
+
+.bulk-stats {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.stat-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stat-badge.active {
+  background-color: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.stat-badge.locked {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+/* Кнопки в таблице */
+.lock-btn {
+  background-color: #fef3c7;
+  color: #92400e;
+  border-color: #fbbf24;
+}
+
+.lock-btn:hover {
+  background-color: #fde68a;
+}
+
+.unlock-btn {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-color: #10b981;
+}
+
+.unlock-btn:hover {
+  background-color: #a7f3d0;
+}
+
+/* Индикатор статуса в таблице */
+.status-badge.locked {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.status-badge.active {
+  background-color: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
 /* Разные стили для кнопок создания и пересоздания */
 .create-btn {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -4004,6 +5174,364 @@ th {
   border-color: #fbbf24 !important;
   opacity: 0.7;
 }
+
+
+.single-repo-create {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-left: auto;
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.participant-select {
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+  min-width: 250px;
+  font-size: 14px;
+}
+
+.participant-select:disabled {
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.single-create-btn {
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.single-create-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.single-create-btn:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+/* Стиль для участника с репозиторием */
+option[data-has-repo="true"] {
+  color: #10b981;
+  font-weight: 500;
+}
+
+
+
+/* Стили для умной кнопки */
+.smart-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+}
+
+.smart-btn.create-btn {
+  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+}
+
+.smart-btn.recreate-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.smart-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+
+/* Стили для вкладки экспертов */
+.experts-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.expert-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.create-expert-btn {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+}
+
+.public-repo-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+}
+
+/* Стили для ролей */
+.role-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.role-chief {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fbbf24;
+}
+
+.role-tech {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #60a5fa;
+}
+
+.role-expert {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #9ca3af;
+}
+
+/* Карточка публичного репозитория */
+.repo-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.repo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.repo-header h5 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #1f2937;
+}
+
+.public-badge {
+  background: #dcfce7;
+  color: #166534;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid #86efac;
+}
+
+.repo-description {
+  color: #6b7280;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.repo-links {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 1rem;
+}
+
+.repo-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+/* Стили для таблицы экспертов */
+.expert-name {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.expert-email {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.public-repo-section {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.public-repo-section h4 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #1f2937;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.public-repo-info {
+  animation: fadeIn 0.3s ease;
+}
+
+.repo-card {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 2px solid #7dd3fc;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.repo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.repo-header h5 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.public-badge {
+  background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%);
+  color: white;
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.repo-description {
+  color: #475569;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+  font-size: 0.95rem;
+}
+
+.repo-owner {
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  border: 1px solid #bae6fd;
+}
+
+.repo-owner small {
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+.repo-links {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.repo-links .link-btn {
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.repo-links .link-btn:first-child {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+}
+
+.repo-links .link-btn:first-child:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.repo-links .link-btn:last-child {
+  background: white;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.repo-links .link-btn:last-child:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.repo-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.repo-meta small {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.repo-meta small::before {
+  content: "•";
+  color: #94a3b8;
+}
+
+/* Анимации */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+  .public-repo-section {
+    padding: 1rem;
+  }
+  
+  .repo-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .repo-links {
+    flex-direction: column;
+  }
+  
+  .repo-links .link-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 
 @keyframes fadeIn {
   from { opacity: 0; }
