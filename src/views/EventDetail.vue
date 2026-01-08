@@ -157,6 +157,36 @@
         </form>
       </section>
 
+      
+      <div class="export-section" v-if="hasParticipants">
+      <h3>📄 Экспорт данных участников</h3>
+      
+      <div class="export-options">
+        <button 
+          @click="exportToWord"
+          class="action-btn export-btn"
+          :disabled="exporting"
+          title="Экспорт всех участников в Word документ"
+        >
+          <span v-if="exporting">
+            <span class="loading-dots">
+              <span></span><span></span><span></span>
+            </span>
+            Создание документа...
+          </span>
+          <span v-else>
+            📋 Экспорт в Word (.docx)
+          </span>
+        </button>
+        
+        <div class="export-info">
+          <p>📊 Всего участников: {{ participantsCount }}</p>
+          <p>📄 Будет создан документ Word с данными для подключения</p>
+          <small>Документ содержит логины, пароли и инструкции для каждого участника</small>
+        </div>
+      </div>
+    </div>
+
       <!-- Панель сортировки -->
       <section class="sort-panel">
         <span class="sort-label">Сортировка:</span>
@@ -448,12 +478,14 @@ import SimpleAddUserModal from '@/components/SimpleAddUserModal.vue'
 import EditUserModal from '@/components/EditUserModal.vue'
 import CreateModuleModal from '@/components/CreateModuleModal.vue'
 import MassAddUsersModal from '@/components/MassAddUsersModal.vue'
+import ModuleBulkService from '@/services/ModuleBulkService'
+import WordExportService  from '@/services/wordExportService'
 
 const route = useRoute()
 const router = useRouter()
 const eventId = route.params.id
 
-
+const exporting = ref(false)
 
 // Данные мероприятия
 const event = ref(null)
@@ -754,19 +786,70 @@ const updateEvent = async () => {
         updating.value = true
         editError.value = ''
         
+        // Получаем старый статус мероприятия
+        const oldStatusId = event.value.status_id
+        const newStatusId = parseInt(editEventData.value.status_id)
+        
         // Форматируем данные для API
         const updateData = {
         name: editEventData.value.name.trim(),
-        date: formatDateForAPI(editEventData.value.date), // тот же метод что и для создания
-        status_id: parseInt(editEventData.value.status_id)
+        date: formatDateForAPI(editEventData.value.date),
+        status_id: newStatusId
         }
         
         console.log('🔄 Обновляем мероприятие:', updateData)
+        console.log('📊 Статус:', { old: oldStatusId, new: newStatusId })
         
+        // 1. Обновляем мероприятие
         const updatedEvent = await EventsService.updateEvent(eventId, updateData)
         console.log('✅ Мероприятие обновлено:', updatedEvent)
         
-        // Обновляем данные на странице
+        // 2. Если статус изменился с "Активен" на другой
+        if (oldStatusId === 2 && newStatusId !== 2) {
+          // Мероприятие стало неактивным - блокируем все модули
+          console.log('⚠️ Мероприятие стало неактивным, блокируем все модули...')
+          
+          const confirmMessage = `Мероприятие стало неактивным.\n\nБудут заблокированы ВСЕ ресурсы всех модулей:\n• Все базы данных (только чтение)\n• Все репозитории (только чтение)\n• Все модули будут отключены\n\nПродолжить?`
+          
+          if (confirm(confirmMessage)) {
+            alert('🔄 Начинаем блокировку всех модулей мероприятия...')
+            
+            const blockResult = await ModuleBulkService.blockAllEventModules(eventId)
+            
+            let resultMessage = `✅ Мероприятие и все его модули отключены!\n\n`
+            resultMessage += `📊 Результаты блокировки:\n`
+            resultMessage += `• Модулей обработано: ${blockResult.total_modules}\n`
+            resultMessage += `• Успешно: ${blockResult.successful_modules}\n`
+            resultMessage += `• Ошибок: ${blockResult.failed_modules}\n`
+            resultMessage += `• Статус мероприятия: ${updatedEvent.status?.name || 'Отключен'}\n`
+            
+            alert(resultMessage)
+          }
+        }
+        // 3. Если статус изменился на "Активен"
+        else if (oldStatusId !== 2 && newStatusId === 2) {
+          // Мероприятие стало активным - разблокируем все модули
+          console.log('✅ Мероприятие стало активным, разблокируем все модули...')
+          
+          const confirmMessage = `Мероприятие стало активным.\n\nБудут разблокированы ВСЕ ресурсы всех модулей:\n• Все базы данных (полный доступ)\n• Все репозитории (запись и чтение)\n• Все модули будут активированы\n\nПродолжить?`
+          
+          if (confirm(confirmMessage)) {
+            alert('🔄 Начинаем разблокировку всех модулей мероприятия...')
+            
+            const unblockResult = await ModuleBulkService.unblockAllEventModules(eventId)
+            
+            let resultMessage = `✅ Мероприятие и все его модули активированы!\n\n`
+            resultMessage += `📊 Результаты разблокировки:\n`
+            resultMessage += `• Модулей обработано: ${unblockResult.total_modules}\n`
+            resultMessage += `• Успешно: ${unblockResult.successful_modules}\n`
+            resultMessage += `• Ошибок: ${unblockResult.failed_modules}\n`
+            resultMessage += `• Статус мероприятия: ${updatedEvent.status?.name || 'Активен'}\n`
+            
+            alert(resultMessage)
+          }
+        }
+        
+        // 4. Обновляем данные на странице
         event.value = updatedEvent
 
         if (!event.value.status && event.value.status_id) {
@@ -775,7 +858,10 @@ const updateEvent = async () => {
           );
         }
         
-        // Закрываем модальное окно
+        // 5. Перезагружаем модули (чтобы видеть обновленные статусы)
+        await loadModules()
+        
+        // 6. Закрываем модальное окно
         closeEditModal()
         
         // Уведомление
@@ -1477,6 +1563,106 @@ const handleUserSaved = (updatedUser) => {
   alert('✅ Изменения сохранены!')
 }
 
+const checkAndSyncModules = async () => {
+  try {
+    if (event.value) {
+      console.log('🔍 Проверяем синхронизацию модулей мероприятия...')
+      
+      // Если мероприятие не активно
+      if (event.value.status_id !== 2) {
+        console.log('⚠️ Мероприятие не активно, проверяем модули...')
+        
+        const modules = await EventsService.getEventModules(eventId)
+        
+        // Ищем активные модули
+        const activeModules = modules.filter(m => m.status_id === 2) // ID статуса "Активен"
+        
+        if (activeModules.length > 0) {
+          const moduleNames = activeModules.map(m => `• "${m.name}"`).join('\n')
+          
+          const warningMessage = `⚠️ ВНИМАНИЕ! ⚠️\n\nМероприятие "${event.value.name}" не активно,\nно найдены активные модули:\n\n${moduleNames}\n\nХотите автоматически заблокировать все ресурсы этих модулей?\n\nЭто переведет их в режим "только чтение".`
+          
+          if (confirm(warningMessage)) {
+            alert('🔄 Начинаем блокировку активных модулей...')
+            
+            for (const module of activeModules) {
+              try {
+                await ModuleBulkService.blockSingleModule(module.id)
+                console.log(`✅ Модуль ${module.name} заблокирован`)
+              } catch (error) {
+                console.error(`❌ Ошибка блокировки модуля ${module.id}:`, error)
+              }
+            }
+            
+            alert('✅ Все активные модули заблокированы!')
+            
+            // Перезагружаем модули
+            await loadModules()
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Ошибка проверки синхронизации:', error)
+  }
+}
+
+// Метод экспорта всех участников
+const exportToWord = async () => {
+  if (participantsCount.value === 0) {
+    alert('❌ Нет участников для экспорта')
+    return
+  }
+  
+  const confirmMessage = `Экспортировать данные ${participantsCount.value} участников в Word документ?\n\nДокумент будет содержать:\n• Данные для входа каждого участника\n• Реквизиты для подключения к БД\n• Инструкции по использованию\n\nДокумент можно распечатать и раздать участникам.`
+  
+  if (!confirm(confirmMessage)) return
+  
+  try {
+    exporting.value = true
+    
+    // Импортируем сервис
+    const wordExportService = await import('@/services/wordExportService')
+    
+    const currentEvent = event.value
+    
+    if (!currentEvent) {
+      throw new Error('Мероприятие не найдено')
+    }
+    
+    // Используем методы экземпляра класса
+    const participants = wordExportService.default.prepareParticipantsData(
+      users.value, 
+      eventAccounts.value
+    )
+    
+    console.log('📊 Подготовлены участники для экспорта:', participants)
+    
+    const { blob, fileName } = await wordExportService.default.createParticipantsDocument(
+      currentEvent, 
+      participants
+    )
+    
+    // Сохраняем файл
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    
+    alert(`✅ Документ создан успешно!\n\nФайл: ${fileName}\nУчастников: ${participants.length}\n\nФайл загружен.`)
+    
+  } catch (error) {
+    console.error('❌ Ошибка экспорта:', error)
+    alert(`❌ Ошибка создания документа: ${error.message || 'Не удалось экспортировать данные'}`)
+  } finally {
+    exporting.value = false
+  }
+}
+
 // Загрузка всех данных
 const loadAllData = async () => {
   await Promise.all([
@@ -1490,6 +1676,10 @@ const loadAllData = async () => {
 onMounted(async () => {
   console.log('Загружаем страницу мероприятия')
   await loadAllData()
+  
+  // Проверяем синхронизацию модулей
+  await checkAndSyncModules()
+  
   // Отладка статусов модулей
   if (modules.value.length > 0) {
     console.log('🔍 Анализ статусов модулей:')
@@ -1504,7 +1694,6 @@ onMounted(async () => {
   }
   normalizeStatuses()
 })
-
 </script>
 
 <style scoped>
@@ -2577,6 +2766,108 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.export-section {
+  margin: 30px 0;
+  padding: 25px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 12px;
+  border: 2px solid #dee2e6;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.export-section h3 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #495057;
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.export-options {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.export-btn {
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  color: white;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.export-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
+}
+
+.export-info {
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #3498db;
+}
+
+.export-info p {
+  margin: 0 0 8px 0;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.export-info p:first-child {
+  font-weight: 600;
+  color: #3498db;
+}
+
+.export-info small {
+  color: #7f8c8d;
+  font-size: 13px;
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.loading-dots span {
+  width: 8px;
+  height: 8px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: pulse 1.4s infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 @keyframes button-spinner {
