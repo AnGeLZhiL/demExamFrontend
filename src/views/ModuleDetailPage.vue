@@ -144,41 +144,140 @@
             <div class="stats-grid">
               <div class="stat-card">
                 <div class="stat-icon">🗄️</div>
-                <div class="stat-value">0</div>
+                <div class="stat-value">{{ databases.length }}</div>
                 <div class="stat-label">Базы данных</div>
-                <button class="stat-action">Добавить</button>
+                <button 
+                  @click="handleTabChange('databases')" 
+                  class="stat-action"
+                  :disabled="loadingDatabases"
+                >
+                  <span v-if="loadingDatabases">⏳</span>
+                  <span v-else>Управлять</span>
+                </button>
               </div>
               <div class="stat-card">
                 <div class="stat-icon">💾</div>
-                <div class="stat-value">0</div>
+                <div class="stat-value">{{ repositories.length }}</div>
                 <div class="stat-label">Репозитории</div>
-                <button class="stat-action">Добавить</button>
+                <button 
+                  @click="handleTabChange('repositories')" 
+                  class="stat-action"
+                  :disabled="loadingRepositories"
+                >
+                  <span v-if="loadingRepositories">⏳</span>
+                  <span v-else>Управлять</span>
+                </button>
               </div>
-              <div class="stat-card">
-                <div class="stat-icon">🖥️</div>
-                <div class="stat-value">0</div>
-                <div class="stat-label">Серверы</div>
-                <button class="stat-action">Добавить</button>
+            </div>
+            <div class="connections-status">
+              <h4>🔗 Статус подключений</h4>
+              <div class="connection-items">
+                <div class="connection-item" :class="gogsConnected ? 'connected' : 'disconnected'">
+                  <span class="connection-icon">💾</span>
+                  <span class="connection-label">Gogs Git</span>
+                  <span class="connection-status">
+                    {{ gogsConnected ? '✅ Подключен' : '❌ Отключен' }}
+                  </span>
+                  <button 
+                    @click="testGogsConnection" 
+                    class="connection-test-btn"
+                    :disabled="testingConnection"
+                  >
+                    <span v-if="testingConnection">⏳</span>
+                    <span v-else>Проверить</span>
+                  </button>
+                </div>
+                <div class="connection-item connected">
+                  <span class="connection-icon">🗄️</span>
+                  <span class="connection-label">PostgreSQL</span>
+                  <span class="connection-status">✅ Доступен</span>
+                  <button 
+                    @click="testConnectionDirectly" 
+                    class="connection-test-btn"
+                  >
+                    Тест
+                  </button>
+                </div>
               </div>
-              <!-- <div class="stat-card">
-                <div class="stat-icon">🔧</div>
-                <div class="stat-value">4</div>
-                <div class="stat-label">Настроек</div>
-                <button class="stat-action" @click="activeTab = 'settings'">Настроить</button>
-              </div> -->
             </div>
           </div>
 
           <div class="overview-section">
-            <h3>Активность модуля</h3>
+            <h3>📅 Активность модуля</h3>
             <div class="activity-timeline">
               <div class="activity-item" v-if="module?.created_at">
-                <div class="activity-dot"></div>
+                <div class="activity-dot primary"></div>
                 <div class="activity-content">
                   <div class="activity-time">{{ formatDateTime(module.created_at) }}</div>
                   <div class="activity-text">Модуль создан</div>
                 </div>
               </div>
+              
+              <!-- Последняя активность с БД -->
+              <div class="activity-item" v-if="databases.length > 0">
+                <div class="activity-dot success"></div>
+                <div class="activity-content">
+                  <div class="activity-time">
+                    {{ formatDateTime(getLatestDatabaseUpdate()) }}
+                  </div>
+                  <div class="activity-text">
+                    Создано {{ databases.length }} баз данных
+                  </div>
+                  <div class="activity-subtext">
+                    Активных: {{ activeDatabasesCount }}, Заблокированных: {{ lockedDatabasesCount }}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Последняя активность с репозиториями -->
+              <div class="activity-item" v-if="repositories.length > 0">
+                <div class="activity-dot info"></div>
+                <div class="activity-content">
+                  <div class="activity-time">
+                    {{ formatDateTime(getLatestRepositoryUpdate()) }}
+                  </div>
+                  <div class="activity-text">
+                    Создано {{ repositories.length }} репозиториев
+                  </div>
+                  <div class="activity-subtext">
+                    Активных: {{ activeRepositoriesCount }}, Заблокированных: {{ lockedRepositoriesCount }}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Активность с экспертами -->
+              <div class="activity-item" v-if="Array.isArray(experts) && experts.length > 0">
+                <div class="activity-dot warning"></div>
+                <div class="activity-content">
+                  <div class="activity-text">
+                    Назначено {{ experts.length }} экспертов
+                  </div>
+                  <div class="activity-subtext">
+                    С аккаунтами: {{ experts.filter(e => e.has_gogs_account).length }}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Публичный репозиторий -->
+              <div class="activity-item" v-if="publicRepository">
+                <div class="activity-dot public"></div>
+                <div class="activity-content">
+                  <div class="activity-time">
+                    {{ formatDateTime(publicRepository.created_at || publicRepository.updated_at) }}
+                  </div>
+                  <div class="activity-text">
+                    Создан публичный репозиторий
+                  </div>
+                  <a 
+                    :href="publicRepository.url || publicRepository.clone_url" 
+                    target="_blank"
+                    class="activity-link"
+                  >
+                    Открыть
+                  </a>
+                </div>
+              </div>
+              
               <div class="activity-item" v-if="module?.updated_at && module.updated_at !== module.created_at">
                 <div class="activity-dot"></div>
                 <div class="activity-content">
@@ -186,11 +285,16 @@
                   <div class="activity-text">Модуль обновлен</div>
                 </div>
               </div>
-              <div class="activity-placeholder" v-if="!module?.created_at">
-                <p>Нет данных об активности</p>
+              
+              <div class="activity-placeholder" v-if="!databases.length && !repositories.length">
+                <p>📭 Ресурсы еще не созданы</p>
+                <button @click="syncDatabases" class="primary-btn">
+                  🚀 Начать создание ресурсов
+                </button>
               </div>
             </div>
           </div>
+          
         </div>
 
         <!-- Вкладка "Базы данных" -->
@@ -540,22 +644,6 @@
     </div>
   </div>
 
-  <!-- Статус подключения -->
-  <div class="connection-status" :class="gogsStatusClass">
-    <div class="status-info">
-      <span class="status-icon">{{ gogsConnected ? '✅' : '❌' }}</span>
-      <span class="status-text">
-        {{ gogsConnected ? 'Gogs сервер подключен' : 'Gogs сервер не подключен' }}
-      </span>
-      <span v-if="gogsConnected" class="mock-badge" title="Режим демонстрации">
-        Демо-режим
-      </span>
-    </div>
-    <div v-if="gogsInfo" class="connection-details">
-      <small>Версия: {{ gogsInfo.version }} | Статус: {{ gogsInfo.status }}</small>
-    </div>
-  </div>
-
   <!-- Таблица репозиториев -->
   <div v-if="loadingRepositories" class="loading-state">
     <div class="spinner"></div>
@@ -771,17 +859,17 @@
             <tbody>
               <!-- Проверяем, что expert существует в итерации -->
               <tr v-for="expert in experts" :key="expert.id">
-                <td>{{ expert?.name || 'Неизвестно' }}</td>
-                <td>{{ expert?.role || 'Эксперт' }}</td>
-                <td>
+                <td class="participant-name">{{ expert?.name || 'Неизвестно' }}</td>
+                <td class="participant-name">{{ expert?.role || 'Эксперт' }}</td>
+                <td class="participant-name">
                   <span v-if="expert.has_gogs_account" class="badge success">
-                    ✅ {{ expert.login }}
+                    {{ expert.login }}
                   </span>
                   <span v-else class="badge warning">
                     ❌ Нет учетной записи
                   </span>
                 </td>
-                <td>
+                <td >
                   <!-- Добавьте проверку expert.has_gogs_account -->
                   <button 
                     v-if="expert.has_gogs_account"
@@ -810,7 +898,7 @@
       
       <!-- Публичный репозиторий -->
       <div class="public-repo-section">
-        <h4>🌐 Публичный репозиторий</h4>
+        <h4>Публичный репозиторий</h4>
         
         <div v-if="publicRepoLoading" class="loading">
           <div class="spinner"></div>
@@ -826,18 +914,9 @@
         
         <!-- Отображаем только если репозиторий НЕ null -->
         <div v-else-if="publicRepository" class="public-repo-info">
-          <div class="repo-card">
-            <div class="repo-header">
-              <h5>{{ publicRepository.name }}</h5>
-              <span class="public-badge">🌐 Публичный</span>
-            </div>
             
             <div class="repo-description">
               {{ publicRepository.description }}
-            </div>
-            
-            <div v-if="publicRepository.owner" class="repo-owner">
-              <small>Владелец: {{ publicRepository.owner.name }} ({{ publicRepository.owner.role }})</small>
             </div>
             
             <div class="repo-links">
@@ -846,21 +925,15 @@
                 target="_blank" 
                 class="link-btn"
               >
-                🌐 Открыть в Gogs
+                Открыть в Gogs
               </a>
               <button 
                 @click="copyToClipboard(publicRepository.clone_url)"
                 class="link-btn"
               >
-                📋 Копировать ссылку
+                Копировать ссылку
               </button>
             </div>
-            
-            <div class="repo-meta">
-              <small>Доступен: Всем участникам и экспертам</small>
-              <small>Права: Только эксперты могут вносить изменения</small>
-            </div>
-          </div>
         </div>
         
         <!-- Отображаем если репозиторий null (не создан) -->
@@ -1328,6 +1401,12 @@ const loadModuleExperts = async () => {
     expertsError.value = ''
     
     experts.value = await ExpertService.getModuleExperts(moduleId)
+
+    // ДОБАВЬТЕ ПРОВЕРКУ НА МАССИВ
+    if (!Array.isArray(experts.value)) {
+      console.error('experts не является массивом:', experts.value)
+      experts.value = []
+    }
     
   } catch (error) {
     console.error('❌ Ошибка загрузки экспертов:', error)
@@ -1850,6 +1929,37 @@ const closeEditModal = () => {
   }
   editError.value = ''
   updating.value = false
+}
+
+// Добавьте эти вычисляемые свойства
+const lockedDatabasesCount = computed(() => {
+  return databases.value.filter(db => !db.is_active).length
+})
+
+// Метод для получения последнего обновления БД
+const getLatestDatabaseUpdate = () => {
+  if (databases.value.length === 0) return null
+  
+  const dates = databases.value
+    .map(db => db.updated_at || db.created_at)
+    .filter(date => date)
+    .sort()
+    .reverse()
+  
+  return dates[0]
+}
+
+// Метод для получения последнего обновления репозиториев
+const getLatestRepositoryUpdate = () => {
+  if (repositories.value.length === 0) return null
+  
+  const dates = repositories.value
+    .map(repo => repo.updated_at || repo.created_at)
+    .filter(date => date)
+    .sort()
+    .reverse()
+  
+  return dates[0]
 }
 
 const updateModule = async () => {
@@ -3699,6 +3809,7 @@ th {
   transition: all 0.2s;
   display: flex;
   flex-direction: column;
+  text-align: center;
   align-items: center;
 }
 
@@ -3743,6 +3854,151 @@ th {
   background: #1E6FD9;
 }
 
+/* Статус подключений */
+.connections-status {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.connection-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.connection-item {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.connection-item.connected {
+  border-left: 4px solid #10b981;
+}
+
+.connection-item.disconnected {
+  border-left: 4px solid #ef4444;
+}
+
+.connection-icon {
+  font-size: 1.25rem;
+  margin-right: 0.75rem;
+}
+
+.connection-label {
+  flex: 1;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.connection-status {
+  margin-right: 1rem;
+  font-size: 0.9rem;
+  color: #1e293b;
+}
+
+.connection-test-btn {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.connection-test-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* Таймлайн ресурсов */
+.resources-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.timeline-item {
+  display: flex;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.timeline-icon {
+  font-size: 1.5rem;
+  margin-right: 1rem;
+}
+
+.timeline-content {
+  flex: 1;
+}
+
+.timeline-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.timeline-stats {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.timeline-stat {
+  font-size: 0.9rem;
+}
+
+.timeline-stat strong {
+  color: #1f2937;
+}
+
+.timeline-stat strong.active {
+  color: #10b981;
+}
+
+.timeline-stat strong.locked {
+  color: #ef4444;
+}
+
+.timeline-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.timeline-action-btn {
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.timeline-action-btn.secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.timeline-action-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.timeline-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* История активности */
 .activity-timeline {
   display: flex;
@@ -3759,36 +4015,61 @@ th {
   border-radius: 8px;
 }
 
+/* Активность */
 .activity-dot {
   width: 12px;
   height: 12px;
-  background: #2E80ED;
   border-radius: 50%;
-  margin-top: 0.5rem;
-  flex-shrink: 0;
+  background: #9ca3af;
+  margin-right: 1rem;
 }
 
-.activity-content {
-  flex: 1;
+.activity-dot.primary {
+  background: #3b82f6;
 }
 
-.activity-time {
+.activity-dot.success {
+  background: #10b981;
+}
+
+.activity-dot.info {
+  background: #0ea5e9;
+}
+
+.activity-dot.warning {
+  background: #f59e0b;
+}
+
+.activity-dot.public {
+  background: #8b5cf6;
+}
+
+.activity-subtext {
   font-size: 0.85rem;
-  color: #64748b;
-  font-weight: 500;
-  margin-bottom: 0.25rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
 }
 
-.activity-text {
-  color: #475569;
-  font-weight: 500;
+.activity-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: #3b82f6;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.activity-link:hover {
+  text-decoration: underline;
 }
 
 .activity-placeholder {
   text-align: center;
-  padding: 2rem;
-  color: #94a3b8;
-  font-style: italic;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.activity-placeholder .primary-btn {
+  margin-top: 1rem;
 }
 
 /* Ресурсные вкладки */
@@ -5351,6 +5632,7 @@ option[data-has-repo="true"] {
   font-size: 0.875rem;
 }
 
+
 /* Стили для таблицы экспертов */
 .expert-name {
   font-weight: 500;
@@ -5583,7 +5865,10 @@ option[data-has-repo="true"] {
   }
   
   .stats-grid {
-    grid-template-columns: 1fr;
+    display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
   }
 }
 

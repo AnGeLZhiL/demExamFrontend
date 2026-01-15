@@ -158,9 +158,7 @@
       </section>
 
       
-      <div class="export-section" v-if="hasParticipants">
-      <h3>📄 Экспорт данных участников</h3>
-      
+
       <div class="export-options">
         <button 
           @click="exportToWord"
@@ -178,14 +176,7 @@
             📋 Экспорт в Word (.docx)
           </span>
         </button>
-        
-        <div class="export-info">
-          <p>📊 Всего участников: {{ participantsCount }}</p>
-          <p>📄 Будет создан документ Word с данными для подключения</p>
-          <small>Документ содержит логины, пароли и инструкции для каждого участника</small>
-        </div>
       </div>
-    </div>
 
       <!-- Панель сортировки -->
       <section class="sort-panel">
